@@ -32,10 +32,6 @@ cargo pvm-contract
 ```
 
 This launches an interactive prompt to initialize a new contract project.
-
-Examples:
-
-Initialize a new project with `cargo pvm-contract` and build it with `cargo build`:
-The PolkaVM bytecode will be written to `target/<bin>.<profile>.polkavm`.
+Just build the generated project with `cargo build`. The PolkaVM bytecode will be written to `target/<bin>.<profile>.polkavm`.
 
 
