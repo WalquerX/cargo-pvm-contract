@@ -184,7 +184,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cargo-pvm-contract"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-pvm-contract-builder"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "log",
@@ -748,18 +748,18 @@ checksum = "af35c838647fef3d6d052e27006ef88ea162336eee33063c50a63f163c18cdeb"
 
 [[package]]
 name = "polkavm-common"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed1b408db93d4f49f5c651a7844682b9d7a561827b4dc6202c10356076c055c9"
+checksum = "a0a3e43fa1a54b955a2f9422b1690c3cc29252ac8828c02a99d2370b9f2a188e"
 dependencies = [
  "picosimd",
 ]
 
 [[package]]
 name = "polkavm-linker"
-version = "0.30.0"
+version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6739125c4f8f44b4282b6531d765d599f20514e9b608737c6c3544594d08f995"
+checksum = "e1ae3f7aff1af110dcd0f105d783b10ff25cd2837abe411ea4d88ae5cd193b49"
 dependencies = [
  "dirs",
  "gimli",
