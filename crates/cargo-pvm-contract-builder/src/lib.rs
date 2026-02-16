@@ -28,6 +28,8 @@ pub struct PvmBuilder {
     project_cargo_toml: PathBuf,
     /// Specific binaries to build (None = all binaries).
     bin_names: Option<Vec<String>>,
+    /// Skip ABI generation (useful for DSL contracts that don't have an abi-gen main).
+    skip_abi: bool,
 }
 
 impl Default for PvmBuilder {
@@ -42,6 +44,7 @@ impl PvmBuilder {
         Self {
             project_cargo_toml: get_manifest_dir().join("Cargo.toml"),
             bin_names: None,
+            skip_abi: false,
         }
     }
 
@@ -61,6 +64,12 @@ impl PvmBuilder {
         self
     }
 
+    /// Skip ABI generation. Useful for DSL contracts that don't use the `abi-gen` feature.
+    pub fn skip_abi(mut self) -> Self {
+        self.skip_abi = true;
+        self
+    }
+
     /// Build the PolkaVM binary.
     pub fn build(self) {
         // Check if we're in a recursive build
@@ -68,7 +77,7 @@ impl PvmBuilder {
             return;
         }
 
-        if let Err(e) = build_project(&self.project_cargo_toml, self.bin_names) {
+        if let Err(e) = build_project(&self.project_cargo_toml, self.bin_names, self.skip_abi) {
             eprintln!("PolkaVM build failed: {e}");
             std::process::exit(1);
         }
@@ -155,7 +164,11 @@ fn get_bin_targets(cargo_toml: &Path) -> Result<Vec<String>> {
 }
 
 /// Build the project.
-fn build_project(project_cargo_toml: &Path, bin_names: Option<Vec<String>>) -> Result<()> {
+fn build_project(
+    project_cargo_toml: &Path,
+    bin_names: Option<Vec<String>>,
+    skip_abi: bool,
+) -> Result<()> {
     let profile = Profile::detect();
     let build_dir = get_build_dir();
     let target_root = get_target_root();
@@ -189,8 +202,10 @@ fn build_project(project_cargo_toml: &Path, bin_names: Option<Vec<String>>) -> R
         let output_path = target_root.join(format!("{}.{}.polkavm", bin, profile.directory()));
         link_to_polkavm(&elf_path, &output_path)?;
 
-        let abi_path = target_root.join(format!("{}.{}.abi.json", bin, profile.directory()));
-        generate_abi_file(manifest_dir, bin, &abi_path)?;
+        if !skip_abi {
+            let abi_path = target_root.join(format!("{}.{}.abi.json", bin, profile.directory()));
+            generate_abi_file(manifest_dir, bin, &abi_path)?;
+        }
     }
 
     Ok(())

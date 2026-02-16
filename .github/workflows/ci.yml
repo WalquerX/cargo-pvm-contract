@@ -27,7 +27,7 @@ jobs:
           sudo mv solc /usr/local/bin/solc
       - name: Install Rust nightly for scaffold tests
         run: |
-          rustup toolchain install nightly --component rust-src --profile minimal
+          rustup toolchain install nightly-2026-02-01 --component rust-src --profile minimal
       - name: Run formatting check
         run: cargo fmt --check
       - name: Run clippy
@@ -35,7 +35,7 @@ jobs:
       - name: Run unit tests (types + macros)
         run: cargo test -p pvm-contract-types --features alloc && cargo test -p pvm-contract-macros
       - name: Run integration tests
-        run: cargo test -p cargo-pvm-contract
+        run: cargo test -p cargo-pvm-contract -- --test-threads=1
 
   check-examples:
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
           components: rust-src
       - name: Install Rust nightly for example build
         run: |
-          rustup toolchain install nightly --component rust-src --profile minimal
+          rustup toolchain install nightly-2026-02-01 --component rust-src --profile minimal
       - name: Install solc
         run: |
           SOLC_VERSION=0.8.26

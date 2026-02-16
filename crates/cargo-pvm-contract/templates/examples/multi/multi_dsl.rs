@@ -1,5 +1,5 @@
-#![cfg_attr(not(feature = "abi-gen"), no_main)]
-#![cfg_attr(not(feature = "abi-gen"), no_std)]
+#![no_main]
+#![no_std]
 
 use pvm_contract_builder_dsl::pallet_revive_uapi::{HostFn as _, HostFnImpl, ReturnFlags};
 use pvm_contract_builder_dsl::{ContractBuilder, solidity_selector};
@@ -17,7 +17,6 @@ const BIT_AND_SELECTOR: [u8; 4] = solidity_selector("bitAnd(uint256,uint256)");
 const IS_ZERO_SELECTOR: [u8; 4] = solidity_selector("isZero(uint256)");
 const INCREMENT_SELECTOR: [u8; 4] = solidity_selector("increment(uint32)");
 
-#[cfg(not(feature = "abi-gen"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe {
@@ -26,17 +25,10 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     }
 }
 
-#[cfg(feature = "abi-gen")]
-fn main() {
-    print!("[]");
-}
-
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn deploy() {}
 
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn call() {

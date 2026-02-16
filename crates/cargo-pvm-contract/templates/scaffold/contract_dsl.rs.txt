@@ -1,5 +1,5 @@
-#![cfg_attr(not(feature = "abi-gen"), no_main)]
-#![cfg_attr(not(feature = "abi-gen"), no_std)]
+#![no_main]
+#![no_std]
 {% if use_alloc %}
 extern crate alloc;
 
@@ -53,7 +53,6 @@ use pvm_contract_builder_dsl::{ContractBuilder, solidity_selector};
 use pvm_contract_types::{SolDecode, SolEncode, StaticEncodedLen};
 use ruint::aliases::U256;
 
-#[cfg(not(feature = "abi-gen"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe {
@@ -68,18 +67,10 @@ const {{ func.selector_const }}: [u8; 4] = solidity_selector("{{ func.solidity_s
 {% endfor %}
 {% endif %}
 
-// When compiled with `--features abi-gen`, the builder runs this to produce ABI JSON.
-#[cfg(feature = "abi-gen")]
-fn main() {
-    print!("[]");
-}
-
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn deploy() {}
 
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn call() {

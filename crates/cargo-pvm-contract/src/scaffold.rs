@@ -39,7 +39,9 @@ struct ContractDslTemplate {
 
 #[derive(Template)]
 #[template(path = "scaffold/build.rs.txt")]
-struct BuildRsTemplate;
+struct BuildRsTemplate {
+    use_dsl: bool,
+}
 
 struct MacroFunctionInfo {
     name_snake: String,
@@ -175,7 +177,7 @@ pub fn init_new_contract(contract_name: &str, use_dsl: bool, use_alloc: bool) ->
         lib_rs_content,
     )?;
 
-    let build_rs_content = generate_build_rs()?;
+    let build_rs_content = generate_build_rs(use_dsl)?;
     fs::write(target_dir.join("build.rs"), build_rs_content)?;
 
     let cargo_toml_content =
@@ -325,7 +327,7 @@ fn init_from_example_files_inner(
         lib_rs_content,
     )?;
 
-    let build_rs_content = generate_build_rs()?;
+    let build_rs_content = generate_build_rs(use_dsl)?;
     fs::write(target_dir.join("build.rs"), build_rs_content)?;
 
     let cargo_toml_content =
@@ -624,8 +626,8 @@ fn solidity_to_dsl_decode_type(sol_type: &str) -> String {
     }
 }
 
-fn generate_build_rs() -> Result<String> {
-    BuildRsTemplate
+fn generate_build_rs(use_dsl: bool) -> Result<String> {
+    BuildRsTemplate { use_dsl }
         .render()
         .context("Failed to render build.rs template")
 }

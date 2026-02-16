@@ -1,5 +1,5 @@
-#![cfg_attr(not(feature = "abi-gen"), no_main)]
-#![cfg_attr(not(feature = "abi-gen"), no_std)]
+#![no_main]
+#![no_std]
 
 use pvm_contract_builder_dsl::pallet_revive_uapi::StorageFlags;
 use pvm_contract_builder_dsl::pallet_revive_uapi::{HostFn as _, HostFnImpl, ReturnFlags};
@@ -18,7 +18,6 @@ const TRANSFER_EVENT_SIGNATURE: [u8; 32] = [
     0xb3, 0xef,
 ];
 
-#[cfg(not(feature = "abi-gen"))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     unsafe {
@@ -42,17 +41,10 @@ impl AsRef<[u8]> for Error {
     }
 }
 
-#[cfg(feature = "abi-gen")]
-fn main() {
-    print!("[]");
-}
-
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn deploy() {}
 
-#[cfg(not(feature = "abi-gen"))]
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn call() {
