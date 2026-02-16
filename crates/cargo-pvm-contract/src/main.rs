@@ -30,7 +30,9 @@ struct PvmContractArgs {
     #[arg(long)]
     example: Option<String>,
     #[arg(long, value_enum)]
-    memory_model: Option<MemoryModel>,
+    api_style: Option<ApiStyle>,
+    #[arg(long, value_enum)]
+    allocator: Option<Allocator>,
     #[arg(long)]
     name: Option<String>,
     #[arg(long)]
@@ -39,34 +41,45 @@ struct PvmContractArgs {
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
 enum InitType {
-    SolidityFile,
+    New,
     Example,
-    Blank,
 }
 
 impl std::fmt::Display for InitType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InitType::SolidityFile => write!(f, "From a Solidity interface file (.sol)"),
+            InitType::New => write!(f, "New contract"),
             InitType::Example => write!(f, "From an example contract"),
-            InitType::Blank => write!(f, "Blank (empty contract)"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
-enum MemoryModel {
-    AllocWithAlloy,
+enum ApiStyle {
+    Macro,
+    Dsl,
+}
+
+impl std::fmt::Display for ApiStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiStyle::Macro => write!(f, "Macro (recommended)"),
+            ApiStyle::Dsl => write!(f, "DSL (builder pattern)"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
+enum Allocator {
+    Bump,
     NoAlloc,
 }
 
-impl std::fmt::Display for MemoryModel {
+impl std::fmt::Display for Allocator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MemoryModel::AllocWithAlloy => {
-                write!(f, "alloy-core + allocator (easier API, larger binary)")
-            }
-            MemoryModel::NoAlloc => write!(f, "No allocator (manual encoding, smaller binary)"),
+            Allocator::Bump => write!(f, "Yes - bump allocator (dynamic types)"),
+            Allocator::NoAlloc => write!(f, "No - stack only (smaller binary)"),
         }
     }
 }
@@ -76,8 +89,8 @@ struct ExampleContract {
     name: String,
     folder: String,
     sol_filename: String,
-    rust_no_alloc: String,
-    rust_with_alloc: String,
+    rust_macro: String,
+    rust_dsl: String,
 }
 
 impl ExampleContract {
@@ -88,7 +101,7 @@ impl ExampleContract {
         let sol_filename = sol_file.path().file_name()?.to_str()?.to_string();
         let name = sol_file.path().file_stem()?.to_str()?.to_string();
 
-        let rust_no_alloc = dir
+        let rust_macro = dir
             .files()
             .find(|file| {
                 file.path()
@@ -100,13 +113,13 @@ impl ExampleContract {
             .file_name()?
             .to_str()?
             .to_string();
-        let rust_with_alloc = dir
+        let rust_dsl = dir
             .files()
             .find(|file| {
                 file.path()
                     .file_name()
                     .and_then(|filename| filename.to_str())
-                    .is_some_and(|filename| filename.ends_with("_with_alloc.rs"))
+                    .is_some_and(|filename| filename.ends_with("_dsl.rs"))
             })?
             .path()
             .file_name()?
@@ -117,8 +130,8 @@ impl ExampleContract {
             name,
             folder: dir.path().to_str()?.to_string(),
             sol_filename,
-            rust_no_alloc,
-            rust_with_alloc,
+            rust_macro,
+            rust_dsl,
         })
     }
 
@@ -172,11 +185,10 @@ fn main() -> Result<()> {
 }
 
 fn init_command(args: PvmContractArgs) -> Result<()> {
-    // Get init_type from args or prompt
     let init_type = match args.init_type {
         Some(t) => t,
         None => {
-            let init_types = vec![InitType::SolidityFile, InitType::Example, InitType::Blank];
+            let init_types = vec![InitType::New, InitType::Example];
             Select::new("How do you want to initialize the project?", init_types)
                 .prompt()
                 .context("Failed to get initialization type")?
@@ -184,16 +196,33 @@ fn init_command(args: PvmContractArgs) -> Result<()> {
     };
 
     match init_type {
-        InitType::Blank => {
+        InitType::New => {
             let contract_name = prompt_name(args.name, None)?;
+            let api_style = prompt_api_style(args.api_style)?;
+            let use_dsl = api_style == ApiStyle::Dsl;
+            let use_alloc = prompt_allocator(args.allocator)? == Allocator::Bump;
+            let sol_path = prompt_sol_file(args.sol_file)?;
+
             check_dir_exists(&contract_name)?;
-            debug!("Initializing blank contract: {contract_name}");
-            scaffold::init_blank_contract(&contract_name)
+
+            if let Some(sol_path) = sol_path {
+                debug!(
+                    "Initializing from Solidity file: {} with api style: {:?}",
+                    sol_path.display(),
+                    api_style
+                );
+                let sol_file = sol_path.to_str().ok_or_else(|| {
+                    anyhow::anyhow!("Solidity file path is not valid UTF-8: {sol_path:?}")
+                })?;
+                scaffold::init_from_solidity_file(sol_file, &contract_name, use_dsl, use_alloc)
+            } else {
+                debug!("Initializing new contract: {contract_name}");
+                scaffold::init_new_contract(&contract_name, use_dsl, use_alloc)
+            }
         }
         InitType::Example => {
             let examples = load_examples()?;
 
-            // Get example from args or prompt
             let example = match args.example {
                 Some(example_name) => find_example(&examples, &example_name)?,
                 None => Select::new("Select an example:", examples)
@@ -201,71 +230,44 @@ fn init_command(args: PvmContractArgs) -> Result<()> {
                     .context("Failed to get example choice")?,
             };
 
-            let memory_model = prompt_memory_model(args.memory_model)?;
+            let api_style = prompt_api_style(args.api_style)?;
             let contract_name = prompt_name(args.name, Some(&example.name))?;
 
             check_dir_exists(&contract_name)?;
             debug!(
-                "Initializing from example: {} with memory model: {:?}",
-                example.sol_filename, memory_model
+                "Initializing from example: {} with api style: {:?}",
+                example.sol_filename, api_style
             );
 
-            init_from_example(&example, &contract_name, memory_model)
-        }
-        InitType::SolidityFile => {
-            // Get sol_file from args or prompt
-            let sol_path = match args.sol_file {
-                Some(path) => path,
-                None => {
-                    let sol_file = Text::new("Enter path to your .sol file:")
-                        .with_help_message("Path to a Solidity interface file")
-                        .prompt()
-                        .context("Failed to get .sol file path")?;
-
-                    if sol_file.is_empty() {
-                        anyhow::bail!("Solidity file path cannot be empty");
-                    }
-                    PathBuf::from(sol_file)
-                }
-            };
-
-            if !sol_path.exists() {
-                anyhow::bail!("Solidity file not found: {}", sol_path.display());
-            }
-
-            let default_name = sol_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("contract")
-                .to_string();
-
-            let memory_model = prompt_memory_model(args.memory_model)?;
-            let contract_name = prompt_name(args.name, Some(&default_name))?;
-
-            check_dir_exists(&contract_name)?;
-            debug!(
-                "Initializing from Solidity file: {} with memory model: {:?}",
-                sol_path.display(),
-                memory_model
-            );
-
-            let sol_file = sol_path.to_str().ok_or_else(|| {
-                anyhow::anyhow!("Solidity file path is not valid UTF-8: {:?}", sol_path)
-            })?;
-            let use_alloc = memory_model == MemoryModel::AllocWithAlloy;
-            scaffold::init_from_solidity_file(sol_file, &contract_name, use_alloc)
+            init_from_example(&example, &contract_name, api_style)
         }
     }
 }
 
-fn prompt_memory_model(arg: Option<MemoryModel>) -> Result<MemoryModel> {
+fn prompt_api_style(arg: Option<ApiStyle>) -> Result<ApiStyle> {
     match arg {
-        Some(m) => Ok(m),
+        Some(s) => Ok(s),
         None => {
-            let memory_models = vec![MemoryModel::AllocWithAlloy, MemoryModel::NoAlloc];
-            Select::new("Which memory model do you want to use?", memory_models)
+            let styles = vec![ApiStyle::Macro, ApiStyle::Dsl];
+            Select::new("Which API style?", styles)
                 .prompt()
-                .context("Failed to get memory model choice")
+                .context("Failed to get API style choice")
+        }
+    }
+}
+
+fn prompt_allocator(arg: Option<Allocator>) -> Result<Allocator> {
+    match arg {
+        Some(a) => Ok(a),
+        None => {
+            use std::io::IsTerminal;
+            if !std::io::stdin().is_terminal() {
+                return Ok(Allocator::NoAlloc);
+            }
+            let allocators = vec![Allocator::Bump, Allocator::NoAlloc];
+            Select::new("Use dynamic types and allocator?", allocators)
+                .prompt()
+                .context("Failed to get allocator choice")
         }
     }
 }
@@ -290,21 +292,53 @@ fn prompt_name(arg: Option<String>, default: Option<&str>) -> Result<String> {
     Ok(contract_name)
 }
 
+fn prompt_sol_file(arg: Option<PathBuf>) -> Result<Option<PathBuf>> {
+    match arg {
+        Some(path) => {
+            if !path.exists() {
+                anyhow::bail!("Solidity file not found: {}", path.display());
+            }
+            Ok(Some(path))
+        }
+        None => {
+            use std::io::IsTerminal;
+            if !std::io::stdin().is_terminal() {
+                return Ok(None);
+            }
+
+            let sol_file = Text::new("Enter path to your .sol file (optional):")
+                .with_help_message("Leave empty to skip, or provide a Solidity interface file")
+                .prompt()
+                .context("Failed to get .sol file path")?;
+
+            if sol_file.trim().is_empty() {
+                Ok(None)
+            } else {
+                let path = PathBuf::from(sol_file);
+                if !path.exists() {
+                    anyhow::bail!("Solidity file not found: {}", path.display());
+                }
+                Ok(Some(path))
+            }
+        }
+    }
+}
+
 fn init_from_example(
     example: &ExampleContract,
     contract_name: &str,
-    memory_model: MemoryModel,
+    api_style: ApiStyle,
 ) -> Result<()> {
     let sol_path = format!("{}/{}", example.folder, example.sol_filename);
     let sol_file = TEMPLATES_DIR
         .get_file(&sol_path)
         .ok_or_else(|| anyhow::anyhow!("Example file not found: {sol_path}"))?;
 
-    let use_alloc = memory_model == MemoryModel::AllocWithAlloy;
-    let rust_example_name = if use_alloc {
-        example.rust_with_alloc.as_str()
+    let use_dsl = api_style == ApiStyle::Dsl;
+    let rust_example_name = if use_dsl {
+        example.rust_dsl.as_str()
     } else {
-        example.rust_no_alloc.as_str()
+        example.rust_macro.as_str()
     };
 
     let rust_path = format!("{}/{}", example.folder, rust_example_name);
@@ -317,7 +351,7 @@ fn init_from_example(
         &example.sol_filename,
         rust_file.contents(),
         contract_name,
-        use_alloc,
+        use_dsl,
     )
 }
 

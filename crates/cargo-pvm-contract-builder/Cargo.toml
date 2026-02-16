@@ -12,3 +12,5 @@ anyhow = { workspace = true }
 log = { workspace = true }
 polkavm-linker = { workspace = true }
 toml_edit = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

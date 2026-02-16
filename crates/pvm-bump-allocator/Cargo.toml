@@ -1,0 +1,11 @@
+[package]
+name = "pvm-bump-allocator"
+description = "A simple bump allocator for PVM smart contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+std = []

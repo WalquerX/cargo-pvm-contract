@@ -1,0 +1,18 @@
+[package]
+name = "pvm-contract-builder-dsl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Builder pattern DSL for PVM smart contracts (no proc macros)"
+
+[dependencies]
+pvm-contract-types = { path = "../pvm-contract-types" }
+pallet-revive-uapi = { version = "0.10", default-features = false }
+polkavm-derive = { version = "0.31.0" }
+ruint = { version = "1.17", default-features = false }
+
+[features]
+default = []
+alloc = ["pvm-contract-types/alloc"]
+abi-reflection = ["pvm-contract-types/abi-reflection"]

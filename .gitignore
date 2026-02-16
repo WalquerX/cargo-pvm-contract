@@ -1,1 +1,4 @@
 target
+.opencode
+examples/*/target/
+*.polkavm

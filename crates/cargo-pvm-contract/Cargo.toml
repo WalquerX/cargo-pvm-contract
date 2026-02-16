@@ -25,7 +25,6 @@ env_logger = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 inquire = { workspace = true }
-tiny-keccak = { workspace = true }
 askama = { workspace = true }
 polkavm-linker = { workspace = true }
 convert_case = { workspace = true }

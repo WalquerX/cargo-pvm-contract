@@ -1,0 +1,111 @@
+#![no_main]
+#![no_std]
+{% if use_alloc %}
+extern crate alloc;
+
+struct BumpAllocator;
+
+const BUMP_HEAP_SIZE: usize = 1024;
+static BUMP_OFFSET: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static mut BUMP_HEAP: [u8; BUMP_HEAP_SIZE] = [0u8; BUMP_HEAP_SIZE];
+
+unsafe impl core::alloc::GlobalAlloc for BumpAllocator {
+    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+        let align = layout.align();
+        let size = layout.size();
+
+        let mut current = BUMP_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
+
+        loop {
+            let aligned = (current + align - 1) & !(align - 1);
+            let Some(next) = aligned.checked_add(size) else {
+                return core::ptr::null_mut();
+            };
+
+            if next > BUMP_HEAP_SIZE {
+                return core::ptr::null_mut();
+            }
+
+            match BUMP_OFFSET.compare_exchange_weak(
+                current,
+                next,
+                core::sync::atomic::Ordering::SeqCst,
+                core::sync::atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    let heap = core::ptr::addr_of_mut!(BUMP_HEAP) as *mut u8;
+                    return heap.wrapping_add(aligned);
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {}
+}
+
+#[global_allocator]
+static ALLOC: BumpAllocator = BumpAllocator;
+{% endif %}
+
+use pvm_contract_builder_dsl::pallet_revive_uapi::{HostFn as _, HostFnImpl, ReturnFlags, StorageFlags};
+use pvm_contract_builder_dsl::{ContractBuilder, solidity_selector};
+use pvm_contract_types::{SolDecode, SolEncode, StaticEncodedLen};
+use ruint::aliases::U256;
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    unsafe {
+        core::arch::asm!("unimp");
+        core::hint::unreachable_unchecked()
+    }
+}
+
+{% if !functions.is_empty() %}
+{% for func in functions %}
+const {{ func.selector_const }}: [u8; 4] = solidity_selector("{{ func.solidity_signature }}");
+{% endfor %}
+{% endif %}
+
+#[unsafe(no_mangle)]
+#[polkavm_derive::polkavm_export]
+pub extern "C" fn deploy() {}
+
+#[unsafe(no_mangle)]
+#[polkavm_derive::polkavm_export]
+pub extern "C" fn call() {
+{% if functions.is_empty() %}
+    // Register your method handlers:
+    // const MY_METHOD: [u8; 4] = solidity_selector("myMethod(uint256)");
+    // ContractBuilder::new()
+    //     .method(MY_METHOD, my_method_handler)
+    //     .dispatch::<HostFnImpl, 256>()
+    HostFnImpl::return_value(ReturnFlags::REVERT, b"NoMethods");
+{% else %}
+    ContractBuilder::new()
+{% for func in functions %}
+        .method({{ func.selector_const }}, {{ func.name_snake }}_handler)
+{% endfor %}
+        .dispatch::<HostFnImpl, 256>()
+{% endif %}
+}
+{% if !functions.is_empty() %}
+{% for func in functions %}
+
+fn {{ func.name_snake }}_handler({% if func.params.is_empty() %}_input{% else %}input{% endif %}: &[u8]) {
+{% for param in func.params %}
+    let {{ param.name }} = {{ param.decode_expr }};
+{% endfor %}
+{% if func.return_rust_type == "()" %}
+    // TODO: implement {{ func.name_snake }}
+    todo!()
+{% else %}
+    // TODO: implement {{ func.name_snake }}
+    let _result: {{ func.return_rust_type }} = todo!();
+    let mut buf = [0u8; <{{ func.return_rust_type }} as StaticEncodedLen>::ENCODED_SIZE];
+    _result.encode_to(&mut buf);
+    HostFnImpl::return_value(ReturnFlags::empty(), &buf);
+{% endif %}
+}
+{% endfor %}
+{% endif %}
