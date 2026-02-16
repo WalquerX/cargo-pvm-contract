@@ -1,37 +1,131 @@
 # cargo-pvm-contract
 
-A cargo subcommand to build Rust contracts to PolkaVM bytecode.
+A Cargo subcommand and toolchain for building Rust smart contracts targeting [PolkaVM](https://github.com/nickg/polkavm) (used by Polkadot's [`pallet-revive`](https://docs.rs/pallet-revive-uapi/latest/pallet_revive_uapi/)).
 
-This tool scaffolds Rust contract projects from Solidity interface files (`.sol`). It automates:
-- Function selector generation
-- Input/output encoding and decoding (ABI)
+It scaffolds Rust contract projects, provides proc macros and a builder DSL for dispatch/ABI encoding, and compiles to `.polkavm` bytecode. A Solidity `.sol` interface file can optionally be provided to auto-generate method stubs and selectors, but is not required -- the macro can infer ABI information directly from Rust function signatures.
 
-This tool is designed for building smart contracts in Rust using the low-level API provided by [pallet-revive-uapi](https://docs.rs/pallet-revive-uapi/latest/pallet_revive_uapi/). For a more high-level, user-friendly API, see [Ink!](https://use.ink/).
+## Features
 
-## Contract Generation
-
-Contracts can be generated using two approaches:
-
-- **High-level API**: Uses the `sol!` macro with automatic struct generation for type-safe contract development
-- **Low-level API**: Provides more manual control over the contract implementation
-
-To learn more, visit the [Rust Contract Template](https://github.com/paritytech/rust-contract-template).
+- **Project scaffolding** -- generate a complete Rust contract project from scratch, or from a `.sol` interface to get typed method stubs with selectors and ABI encoding wired up automatically
+- **Two API styles** -- choose between proc macros (`#[contract]`, `#[method]`) for concise code or a builder-pattern DSL (`ContractBuilder::new().method(...)`) for explicit control
+- **ABI generation** -- the build system compiles your contract on the host to extract type information, then emits a `.abi.json` alongside the `.polkavm` binary
+- **Lightweight ABI encoding** -- `pvm-contract-types` provides `no_std`-compatible `SolEncode`/`SolDecode` traits as an alternative to `alloy-core`, keeping binary sizes small
+- **Allocator options** -- contracts can run in stack-only mode (no allocator), or with a bump allocator (`pvm-bump-allocator`) or `picoalloc` for dynamic types like `String` and `Vec<T>`
 
 ## Installation
 
 ```bash
-cargo install --force --locked cargo-pvm-contract
+cargo install cargo-pvm-contract
 ```
 
-## Usage
+Requires **Rust nightly** with `rust-src` for contract compilation (the scaffolded project handles this via `rust-toolchain.toml`):
 
-Once installed, you can use it as a cargo subcommand:
+```bash
+rustup toolchain install nightly --component rust-src --profile minimal
+```
+
+Optionally install **solc 0.8.26+** if you want to scaffold from `.sol` files:
+
+```bash
+# macOS
+brew install solidity
+
+# Linux
+SOLC_VERSION=0.8.26
+curl -L https://github.com/ethereum/solidity/releases/download/v${SOLC_VERSION}/solc-static-linux -o solc
+chmod +x solc && sudo mv solc /usr/local/bin/solc
+```
+
+## Quick Start
 
 ```bash
 cargo pvm-contract
 ```
 
-This launches an interactive prompt to initialize a new contract project.
-Just build the generated project with `cargo build`. The PolkaVM bytecode will be written to `target/<bin>.<profile>.polkavm`.
+This launches an interactive prompt that walks you through:
 
+1. **Init type** -- start from scratch or from a bundled example (Fibonacci, MyToken, Multi)
+2. **API style** -- Macro (proc-macro attributes) or DSL (builder pattern)
+3. **Allocator** -- Bump allocator (for dynamic types) or no allocator (stack-only, smaller binary)
+4. **Solidity interface** -- optionally point to a `.sol` file to auto-generate method stubs
 
+The generated project builds with a plain `cargo build`. The PolkaVM bytecode and ABI JSON are written to:
+
+```
+target/<binary-name>.<profile>.polkavm
+target/<binary-name>.<profile>.abi.json
+```
+
+## API Styles
+
+### Proc Macro
+
+Annotate a module with `#[contract]` and mark functions with `#[method]`, `#[constructor]`, or `#[fallback]`. The macro generates the PolkaVM entry points, calldata dispatch, and ABI encoding:
+
+```rust
+#[pvm_contract_macros::contract("MyToken.sol", allocator = "bump")]
+mod my_token {
+    #[pvm_contract_macros::constructor]
+    pub fn new() -> Result<(), Error> { Ok(()) }
+
+    #[pvm_contract_macros::method]
+    pub fn total_supply() -> U256 { U256::ZERO }
+
+    #[pvm_contract_macros::method]
+    pub fn transfer(to: Address, amount: U256) -> bool { todo!() }
+}
+```
+
+### Builder DSL
+
+Wire up dispatch explicitly using `ContractBuilder`. No proc macros needed -- all logic is visible in your source:
+
+```rust
+use pvm_contract_builder_dsl::{ContractBuilder, solidity_selector};
+
+const TOTAL_SUPPLY: [u8; 4] = solidity_selector("totalSupply()");
+const TRANSFER: [u8; 4] = solidity_selector("transfer(address,uint256)");
+
+pub extern "C" fn call() {
+    ContractBuilder::new()
+        .method(TOTAL_SUPPLY, total_supply_handler)
+        .method(TRANSFER, transfer_handler)
+        .dispatch::<HostFnImpl, 256>()
+}
+```
+
+## Workspace Crates
+
+| Crate | Description |
+|-------|-------------|
+| `cargo-pvm-contract` | CLI -- scaffolds contract projects from `.sol` files |
+| `cargo-pvm-contract-builder` | Build helper -- `build.rs` integration that links PolkaVM bytecode and generates ABI JSON |
+| `pvm-contract-macros` | Proc macros -- `#[contract]`, `#[method]`, `#[constructor]`, `#[fallback]`, `#[derive(SolType)]` |
+| `pvm-contract-types` | ABI encoding/decoding traits (`SolEncode`, `SolDecode`) -- `no_std` compatible |
+| `pvm-contract-builder-dsl` | Builder-pattern DSL for contracts without proc macros |
+| `pvm-bump-allocator` | Simple bump allocator for short-lived contract executions |
+| `pvm-contract-benchmarks` | Binary size comparison tool for CI regression detection |
+
+## Examples
+
+The `examples/example-mytoken` project contains several MyToken variants as separate binaries:
+
+| Binary | Style | Allocator |
+|--------|-------|-----------|
+| `example-mytoken-macro-pico-alloc` | Proc macro | picoalloc |
+| `example-mytoken-macro-bump-alloc` | Proc macro | pvm-bump-allocator |
+| `example-mytoken-macro-no-alloc` | Proc macro | None (stack-only) |
+| `example-mytoken-macro-no-sol` | Proc macro | None (no `.sol` file) |
+| `example-mytoken-dsl-no-alloc` | Builder DSL | None (stack-only) |
+| `example-mytoken-alloy-alloc` | alloy-core | pvm-bump-allocator |
+
+Build all variants:
+
+```bash
+cd examples/example-mytoken
+env -u CARGO -u RUSTUP_TOOLCHAIN cargo build --release
+```
+
+## License
+
+MIT

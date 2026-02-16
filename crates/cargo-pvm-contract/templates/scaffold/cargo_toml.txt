@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "{{ contract_name }}"
 version = "0.1.0"
@@ -10,18 +12,41 @@ name = "{{ contract_name }}"
 path = "src/{{ bin_source }}.rs"
 
 [dependencies]
-{% if use_alloc -%}
-alloy-core = { version = "0.8", default-features = false, features = ["sol-types"] }
+{% if use_dsl -%}
+{% if let Some(path) = local_path -%}
+pvm-contract-builder-dsl = { path = "{{ path }}/crates/pvm-contract-builder-dsl" }
+pvm-contract-types = { path = "{{ path }}/crates/pvm-contract-types" }
+{% else -%}
+pvm-contract-builder-dsl = "{{ builder_version }}"
+pvm-contract-types = "{{ builder_version }}"
+{% endif -%}
+{% else -%}
+{% if let Some(path) = local_path -%}
+pvm-contract-macros = { path = "{{ path }}/crates/pvm-contract-macros" }
+pvm-contract-types = { path = "{{ path }}/crates/pvm-contract-types" }
+{% else -%}
+pvm-contract-macros = "{{ builder_version }}"
+pvm-contract-types = "{{ builder_version }}"
 {% endif -%}
 pallet-revive-uapi = { version = "0.10", default-features = false }
+{% endif -%}
 {% if use_alloc -%}
-picoalloc = { version = "5", default-features = false }
+{% if let Some(path) = local_path -%}
+pvm-bump-allocator = { path = "{{ path }}/crates/pvm-bump-allocator" }
+{% else -%}
+pvm-bump-allocator = "{{ builder_version }}"
+{% endif -%}
 {% endif -%}
 polkavm-derive = { version = "0.31.0" }
+ruint = { version = "1.17", default-features = false }
+
+
+[features]
+abi-gen = ["pvm-contract-types/abi-reflection"]
 
 [build-dependencies]
-{% if let Some(path) = builder_path -%}
-cargo-pvm-contract-builder = { path = "{{ path }}" }
+{% if let Some(path) = local_path -%}
+cargo-pvm-contract-builder = { path = "{{ path }}/crates/cargo-pvm-contract-builder" }
 {% else -%}
 cargo-pvm-contract-builder = "{{ builder_version }}"
 {% endif %}
