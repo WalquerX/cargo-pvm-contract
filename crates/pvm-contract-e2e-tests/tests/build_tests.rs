@@ -1,15 +1,8 @@
 //! Build artifact tests for examples/example-mytoken.
 //!
-//! These verify the toolchain produces correct .polkavm binaries and ABI JSON
-//! without requiring a blockchain node. Requirements: nightly + rust-src + solc.
-//!
-//! Run: cargo test -p pvm-contract-e2e-tests --test build_tests -- --ignored
+//! These verify the toolchain produces correct ABI JSON
 
 use pvm_contract_e2e_tests::build::contract;
-
-const SOL_MACRO_VARIANTS: &[&str] = &["example-mytoken-macro-bump-alloc"];
-
-const NON_SOL_VARIANTS: &[&str] = &["example-mytoken-macro-no-sol", "example-mytoken-dsl-no-alloc"];
 
 fn mytoken() -> pvm_contract_e2e_tests::build::Contract {
     contract("example-mytoken")
@@ -22,7 +15,8 @@ fn build_abi_contains_correct_function_signatures() {
     c.build();
 
     let content =
-        std::fs::read_to_string(c.abi_json_path(SOL_MACRO_VARIANTS[0], "release")).unwrap();
+        std::fs::read_to_string(c.abi_json_path("example-mytoken-macro-bump-alloc", "release"))
+            .unwrap();
     let abi: serde_json::Value = serde_json::from_str(&content).unwrap();
     let functions: Vec<&serde_json::Value> = abi
         .as_array()

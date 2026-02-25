@@ -44,7 +44,6 @@ fn deploy_mytoken() -> (CastClient, String) {
 fn dispatch_routes_view_selectors_correctly() {
     let (cast, address) = deploy_mytoken();
 
-    // totalSupply() and balanceOf(address) should both return 0 on fresh deploy
     let supply = cast.call(&address, "totalSupply()(uint256)", &[]);
     assert_eq!(supply, "0");
 
@@ -129,8 +128,6 @@ fn dispatch_revert_propagates_on_underflow() {
 
     assert!(!output.status.success(), "Transfer underflow should revert");
 }
-
-// --- Variant parity: all toolchain paths produce equivalent contracts ---
 
 #[test]
 #[ignore]

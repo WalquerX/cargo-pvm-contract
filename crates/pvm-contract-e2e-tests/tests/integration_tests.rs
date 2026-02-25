@@ -171,7 +171,6 @@ fn return_triple_tuple() {
     let lines: Vec<&str> = val.lines().collect();
     assert_eq!(lines.len(), 3, "Expected 3 return values, got: {val}");
     assert_eq!(lines[0].trim(), "123");
-    // 0xAB repeated 20 times
     assert_eq!(
         lines[1].trim().to_lowercase(),
         "0xabababababababababababababababababababab"
