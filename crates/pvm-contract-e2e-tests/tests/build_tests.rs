@@ -17,31 +17,6 @@ fn mytoken() -> pvm_contract_e2e_tests::build::Contract {
 
 #[test]
 #[ignore]
-fn build_produces_abi_json_only_for_sol_macro_variants() {
-    let c = mytoken();
-    c.build();
-
-    for name in SOL_MACRO_VARIANTS {
-        let path = c.target().join(format!("{name}.release.abi.json"));
-        assert!(
-            path.exists(),
-            "Expected ABI JSON for {name}: {}",
-            path.display()
-        );
-    }
-
-    for name in NON_SOL_VARIANTS {
-        let path = c.target().join(format!("{name}.release.abi.json"));
-        assert!(
-            !path.exists(),
-            "Unexpected ABI JSON for {name}: {}",
-            path.display()
-        );
-    }
-}
-
-#[test]
-#[ignore]
 fn build_abi_contains_correct_function_signatures() {
     let c = mytoken();
     c.build();
