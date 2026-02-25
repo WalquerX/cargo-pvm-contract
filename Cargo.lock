@@ -2181,6 +2181,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pvm-contract-e2e-tests"
+version = "0.3.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "pvm-contract-macros"
 version = "0.3.0"
 dependencies = [
