@@ -3,10 +3,12 @@
 //! These deploy contracts to anvil-polkadot and verify dispatch routing,
 //! error handling, and variant parity through actual blockchain transactions.
 //!
+//! Each test starts its own anvil-polkadot node on a unique port for full isolation.
+//!
 //! Requirements: nightly + rust-src + solc + anvil-polkadot + cast
 //! Run: cargo test -p pvm-contract-e2e-tests --test e2e_tests -- --ignored --test-threads=1
 
-use pvm_contract_e2e_tests::anvil::shared_anvil;
+use pvm_contract_e2e_tests::anvil::AnvilPolkadot;
 use pvm_contract_e2e_tests::build::contract;
 use pvm_contract_e2e_tests::cast::{CastClient, DEFAULT_ADDRESS, DEFAULT_PRIVATE_KEY};
 
@@ -22,18 +24,17 @@ fn mytoken() -> pvm_contract_e2e_tests::build::Contract {
     contract("example-mytoken")
 }
 
-fn deploy_variant(variant: &str) -> (CastClient, String) {
+fn deploy_variant(variant: &str) -> (AnvilPolkadot, CastClient, String) {
     let c = mytoken();
     c.build();
-    let anvil = shared_anvil();
-    anvil.reset();
+    let anvil = AnvilPolkadot::start();
     let cast = CastClient::new(&anvil.rpc_url);
     let hex = c.bytecode_hex(variant, "release");
     let address = cast.deploy(&hex, DEFAULT_PRIVATE_KEY);
-    (cast, address)
+    (anvil, cast, address)
 }
 
-fn deploy_mytoken() -> (CastClient, String) {
+fn deploy_mytoken() -> (AnvilPolkadot, CastClient, String) {
     deploy_variant(DEFAULT_VARIANT)
 }
 
@@ -42,7 +43,7 @@ fn deploy_mytoken() -> (CastClient, String) {
 #[test]
 #[ignore] // Requires anvil-polkadot + cast
 fn dispatch_routes_view_selectors_correctly() {
-    let (cast, address) = deploy_mytoken();
+    let (_anvil, cast, address) = deploy_mytoken();
 
     let supply = cast.call(&address, "totalSupply()(uint256)", &[]);
     assert_eq!(supply, "0");
@@ -54,7 +55,7 @@ fn dispatch_routes_view_selectors_correctly() {
 #[test]
 #[ignore]
 fn dispatch_routes_write_selectors_correctly() {
-    let (cast, address) = deploy_mytoken();
+    let (_anvil, cast, address) = deploy_mytoken();
 
     // mint and transfer are write selectors — verify they execute and change state
     cast.send(
@@ -87,8 +88,7 @@ fn dispatch_routes_write_selectors_correctly() {
 fn dispatch_fallback_handles_unknown_selector() {
     let c = mytoken();
     c.build();
-    let anvil = shared_anvil();
-    anvil.reset();
+    let anvil = AnvilPolkadot::start();
     let cast = CastClient::new(&anvil.rpc_url);
     let hex = c.bytecode_hex(DEFAULT_VARIANT, "release");
     let address = cast.deploy(&hex, DEFAULT_PRIVATE_KEY);
@@ -116,7 +116,7 @@ fn dispatch_fallback_handles_unknown_selector() {
 #[test]
 #[ignore]
 fn dispatch_revert_propagates_on_underflow() {
-    let (cast, address) = deploy_mytoken();
+    let (_anvil, cast, address) = deploy_mytoken();
 
     // Transfer with 0 balance — generated dispatch should propagate the revert
     let output = cast.send_expect_revert(
@@ -133,7 +133,7 @@ fn dispatch_revert_propagates_on_underflow() {
 #[ignore]
 fn all_variants_deploy_and_respond_to_selectors() {
     for variant in ALL_VARIANTS {
-        let (cast, address) = deploy_variant(variant);
+        let (_anvil, cast, address) = deploy_variant(variant);
 
         let supply = cast.call(&address, "totalSupply()(uint256)", &[]);
         assert_eq!(supply, "0", "{variant}: initial supply should be 0");

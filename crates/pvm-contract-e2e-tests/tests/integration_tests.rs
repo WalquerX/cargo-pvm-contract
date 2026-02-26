@@ -1,16 +1,15 @@
-use pvm_contract_e2e_tests::anvil::shared_anvil;
+use pvm_contract_e2e_tests::anvil::AnvilPolkadot;
 use pvm_contract_e2e_tests::build::contract;
 use pvm_contract_e2e_tests::cast::{CastClient, DEFAULT_ADDRESS, DEFAULT_PRIVATE_KEY};
 
-fn deploy(binary_name: &str) -> (CastClient, String) {
+fn deploy(binary_name: &str) -> (AnvilPolkadot, CastClient, String) {
     let c = contract("test-contracts");
     c.build();
-    let anvil = shared_anvil();
-    anvil.reset();
+    let anvil = AnvilPolkadot::start();
     let cast = CastClient::new(&anvil.rpc_url);
     let hex = c.bytecode_hex(binary_name, "release");
     let address = cast.deploy(&hex, DEFAULT_PRIVATE_KEY);
-    (cast, address)
+    (anvil, cast, address)
 }
 
 // --- Flipper ---
@@ -18,7 +17,7 @@ fn deploy(binary_name: &str) -> (CastClient, String) {
 #[test]
 #[ignore]
 fn flipper_toggle_state() {
-    let (cast, addr) = deploy("flipper");
+    let (_anvil, cast, addr) = deploy("flipper");
 
     let val = cast.call(&addr, "get()(bool)", &[]);
     assert_eq!(val, "false", "Initial value should be false");
@@ -37,7 +36,7 @@ fn flipper_toggle_state() {
 #[test]
 #[ignore]
 fn storage_u8_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(&addr, "setU8(uint8)", &["255"], DEFAULT_PRIVATE_KEY);
     let val = cast.call(&addr, "getU8()(uint8)", &[]);
@@ -47,7 +46,7 @@ fn storage_u8_roundtrip() {
 #[test]
 #[ignore]
 fn storage_u16_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(&addr, "setU16(uint16)", &["65535"], DEFAULT_PRIVATE_KEY);
     let val = cast.call(&addr, "getU16()(uint16)", &[]);
@@ -57,7 +56,7 @@ fn storage_u16_roundtrip() {
 #[test]
 #[ignore]
 fn storage_u32_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(
         &addr,
@@ -72,7 +71,7 @@ fn storage_u32_roundtrip() {
 #[test]
 #[ignore]
 fn storage_u64_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(
         &addr,
@@ -87,7 +86,7 @@ fn storage_u64_roundtrip() {
 #[test]
 #[ignore]
 fn storage_u128_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(
         &addr,
@@ -102,7 +101,7 @@ fn storage_u128_roundtrip() {
 #[test]
 #[ignore]
 fn storage_u256_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
     let big = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
     cast.send(&addr, "setU256(uint256)", &[big], DEFAULT_PRIVATE_KEY);
@@ -113,7 +112,7 @@ fn storage_u256_roundtrip() {
 #[test]
 #[ignore]
 fn storage_bool_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
 
     cast.send(&addr, "setBool(bool)", &["true"], DEFAULT_PRIVATE_KEY);
     let val = cast.call(&addr, "getBool()(bool)", &[]);
@@ -123,7 +122,7 @@ fn storage_bool_roundtrip() {
 #[test]
 #[ignore]
 fn storage_address_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
     let target = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 
     cast.send(&addr, "setAddress(address)", &[target], DEFAULT_PRIVATE_KEY);
@@ -134,7 +133,7 @@ fn storage_address_roundtrip() {
 #[test]
 #[ignore]
 fn storage_bytes32_roundtrip() {
-    let (cast, addr) = deploy("storage-types");
+    let (_anvil, cast, addr) = deploy("storage-types");
     let val_hex = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
     cast.send(
@@ -152,7 +151,7 @@ fn storage_bytes32_roundtrip() {
 #[test]
 #[ignore]
 fn return_pair_tuple() {
-    let (cast, addr) = deploy("return-values");
+    let (_anvil, cast, addr) = deploy("return-values");
 
     let val = cast.call(&addr, "getPair()(uint256,bool)", &[]);
     // cast returns tuple as newline-separated values
@@ -165,7 +164,7 @@ fn return_pair_tuple() {
 #[test]
 #[ignore]
 fn return_triple_tuple() {
-    let (cast, addr) = deploy("return-values");
+    let (_anvil, cast, addr) = deploy("return-values");
 
     let val = cast.call(&addr, "getTriple()(uint256,address,bool)", &[]);
     let lines: Vec<&str> = val.lines().collect();
@@ -181,7 +180,7 @@ fn return_triple_tuple() {
 #[test]
 #[ignore]
 fn return_identity_passthrough() {
-    let (cast, addr) = deploy("return-values");
+    let (_anvil, cast, addr) = deploy("return-values");
 
     let val = cast.call(&addr, "identity(uint256)(uint256)", &["12345"]);
     assert_eq!(val, "12345");
@@ -192,7 +191,7 @@ fn return_identity_passthrough() {
 #[test]
 #[ignore]
 fn caller_returns_sender() {
-    let (cast, addr) = deploy("caller-check");
+    let (_anvil, cast, addr) = deploy("caller-check");
 
     let val = cast.call(&addr, "getCaller()(address)", &[]);
     assert_eq!(
@@ -205,7 +204,7 @@ fn caller_returns_sender() {
 #[test]
 #[ignore]
 fn caller_record_and_read() {
-    let (cast, addr) = deploy("caller-check");
+    let (_anvil, cast, addr) = deploy("caller-check");
 
     cast.send(&addr, "recordCaller()", &[], DEFAULT_PRIVATE_KEY);
     let val = cast.call(&addr, "getLastCaller()(address)", &[]);
@@ -221,7 +220,7 @@ fn caller_record_and_read() {
 #[test]
 #[ignore]
 fn error_will_revert() {
-    let (cast, addr) = deploy("error-handling");
+    let (_anvil, cast, addr) = deploy("error-handling");
 
     let output = cast.send_expect_revert(&addr, "willRevert()", &[], DEFAULT_PRIVATE_KEY);
     assert!(!output.status.success(), "willRevert() should revert");
@@ -230,7 +229,7 @@ fn error_will_revert() {
 #[test]
 #[ignore]
 fn error_will_succeed() {
-    let (cast, addr) = deploy("error-handling");
+    let (_anvil, cast, addr) = deploy("error-handling");
 
     let val = cast.call(&addr, "willSucceed()(bool)", &[]);
     assert_eq!(val, "true");
@@ -239,7 +238,7 @@ fn error_will_succeed() {
 #[test]
 #[ignore]
 fn error_guarded_rejects_zero() {
-    let (cast, addr) = deploy("error-handling");
+    let (_anvil, cast, addr) = deploy("error-handling");
 
     let output = cast.send_expect_revert(&addr, "setGuarded(uint256)", &["0"], DEFAULT_PRIVATE_KEY);
     assert!(!output.status.success(), "setGuarded(0) should revert");
@@ -248,7 +247,7 @@ fn error_guarded_rejects_zero() {
 #[test]
 #[ignore]
 fn error_guarded_accepts_nonzero() {
-    let (cast, addr) = deploy("error-handling");
+    let (_anvil, cast, addr) = deploy("error-handling");
 
     cast.send(&addr, "setGuarded(uint256)", &["5"], DEFAULT_PRIVATE_KEY);
     let val = cast.call(&addr, "getGuarded()(uint256)", &[]);
@@ -260,7 +259,7 @@ fn error_guarded_accepts_nonzero() {
 #[test]
 #[ignore]
 fn events_value_changed() {
-    let (cast, addr) = deploy("events");
+    let (_anvil, cast, addr) = deploy("events");
 
     cast.send(&addr, "setValue(uint256)", &["100"], DEFAULT_PRIVATE_KEY);
 
@@ -276,7 +275,7 @@ fn events_value_changed() {
 #[test]
 #[ignore]
 fn multi_method_add() {
-    let (cast, addr) = deploy("multi-method");
+    let (_anvil, cast, addr) = deploy("multi-method");
 
     let val = cast.call(&addr, "add(uint256,uint256)(uint256)", &["3", "4"]);
     assert_eq!(val, "7");
@@ -285,7 +284,7 @@ fn multi_method_add() {
 #[test]
 #[ignore]
 fn multi_method_mul() {
-    let (cast, addr) = deploy("multi-method");
+    let (_anvil, cast, addr) = deploy("multi-method");
 
     let val = cast.call(&addr, "mul(uint256,uint256)(uint256)", &["3", "4"]);
     assert_eq!(val, "12");
@@ -294,7 +293,7 @@ fn multi_method_mul() {
 #[test]
 #[ignore]
 fn multi_method_is_zero() {
-    let (cast, addr) = deploy("multi-method");
+    let (_anvil, cast, addr) = deploy("multi-method");
 
     let val = cast.call(&addr, "isZero(uint256)(bool)", &["0"]);
     assert_eq!(val, "true");
@@ -306,7 +305,7 @@ fn multi_method_is_zero() {
 #[test]
 #[ignore]
 fn multi_method_counter() {
-    let (cast, addr) = deploy("multi-method");
+    let (_anvil, cast, addr) = deploy("multi-method");
 
     let val = cast.call(&addr, "getCounter()(uint256)", &[]);
     assert_eq!(val, "0", "Counter should start at 0");
@@ -328,7 +327,7 @@ fn multi_method_counter() {
 #[test]
 #[ignore]
 fn dynamic_string_length() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "getStringLength(string)(uint256)", &["hello world"]);
     assert_eq!(val, "11");
@@ -337,7 +336,7 @@ fn dynamic_string_length() {
 #[test]
 #[ignore]
 fn dynamic_echo_string() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "echoString()(string)", &[]);
     // cast wraps string returns in quotes
@@ -348,7 +347,7 @@ fn dynamic_echo_string() {
 #[test]
 #[ignore]
 fn dynamic_bytes_length() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "getBytesLength(bytes)(uint256)", &["0xDEADBEEF"]);
     assert_eq!(val, "4");
@@ -357,7 +356,7 @@ fn dynamic_bytes_length() {
 #[test]
 #[ignore]
 fn dynamic_echo_bytes() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "echoBytes()(bytes)", &[]);
     assert_eq!(val.to_lowercase(), "0xdeadbeef");
@@ -366,7 +365,7 @@ fn dynamic_echo_bytes() {
 #[test]
 #[ignore]
 fn dynamic_sum_array() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "sumArray(uint256[])(uint256)", &["[1,2,3]"]);
     assert_eq!(val, "6");
@@ -375,7 +374,7 @@ fn dynamic_sum_array() {
 #[test]
 #[ignore]
 fn dynamic_get_array() {
-    let (cast, addr) = deploy("dynamic-types");
+    let (_anvil, cast, addr) = deploy("dynamic-types");
 
     let val = cast.call(&addr, "getArray()(uint256[])", &[]);
     // cast returns arrays as newline-separated or bracket-formatted values
@@ -390,7 +389,7 @@ fn dynamic_get_array() {
 #[test]
 #[ignore]
 fn composite_sum_fixed_array() {
-    let (cast, addr) = deploy("composite-types");
+    let (_anvil, cast, addr) = deploy("composite-types");
 
     let val = cast.call(&addr, "sumFixedArray(uint256[3])(uint256)", &["[10,20,30]"]);
     assert_eq!(val, "60");
@@ -399,7 +398,7 @@ fn composite_sum_fixed_array() {
 #[test]
 #[ignore]
 fn composite_get_fixed_array() {
-    let (cast, addr) = deploy("composite-types");
+    let (_anvil, cast, addr) = deploy("composite-types");
 
     let val = cast.call(&addr, "getFixedArray()(uint256[3])", &[]);
     assert!(
@@ -411,7 +410,7 @@ fn composite_get_fixed_array() {
 #[test]
 #[ignore]
 fn composite_tuple_true() {
-    let (cast, addr) = deploy("composite-types");
+    let (_anvil, cast, addr) = deploy("composite-types");
 
     let val = cast.call(
         &addr,
@@ -424,7 +423,7 @@ fn composite_tuple_true() {
 #[test]
 #[ignore]
 fn composite_tuple_false() {
-    let (cast, addr) = deploy("composite-types");
+    let (_anvil, cast, addr) = deploy("composite-types");
 
     let val = cast.call(
         &addr,
