@@ -12,8 +12,6 @@ fn deploy(binary_name: &str) -> (AnvilPolkadot, CastClient, String) {
     (anvil, cast, address)
 }
 
-// --- Flipper ---
-
 #[test]
 #[ignore]
 fn flipper_toggle_state() {
@@ -30,8 +28,6 @@ fn flipper_toggle_state() {
     let val = cast.call(&addr, "get()(bool)", &[]);
     assert_eq!(val, "false", "After second flip should be false");
 }
-
-// --- Storage Types ---
 
 #[test]
 #[ignore]
@@ -146,8 +142,6 @@ fn storage_bytes32_roundtrip() {
     assert_eq!(val.to_lowercase(), val_hex.to_lowercase());
 }
 
-// --- Return Values ---
-
 #[test]
 #[ignore]
 fn return_pair_tuple() {
@@ -186,8 +180,6 @@ fn return_identity_passthrough() {
     assert_eq!(val, "12345");
 }
 
-// --- Caller Check ---
-
 #[test]
 #[ignore]
 fn caller_returns_sender() {
@@ -214,8 +206,6 @@ fn caller_record_and_read() {
         "getLastCaller should return the recorded sender"
     );
 }
-
-// --- Error Handling ---
 
 #[test]
 #[ignore]
@@ -254,8 +244,6 @@ fn error_guarded_accepts_nonzero() {
     assert_eq!(val, "5");
 }
 
-// --- Events ---
-
 #[test]
 #[ignore]
 fn events_value_changed() {
@@ -269,8 +257,6 @@ fn events_value_changed() {
     let logs = cast.logs(&addr, "ValueChanged(address,uint256,uint256)");
     assert!(!logs.is_empty(), "Should have emitted ValueChanged event");
 }
-
-// --- Multi Method ---
 
 #[test]
 #[ignore]

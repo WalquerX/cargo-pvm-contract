@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 
 /// Each test gets its own anvil-polkadot instance on a unique port.
-/// `Drop` kills the process when the test ends — no shared state between tests.
+/// `Drop` kills the process when the test ends.
 static NEXT_PORT: AtomicU16 = AtomicU16::new(19545);
 
 pub struct AnvilPolkadot {
