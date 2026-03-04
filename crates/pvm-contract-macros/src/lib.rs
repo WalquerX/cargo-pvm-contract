@@ -1,3 +1,9 @@
+//! Proc macros for PVM smart contracts — `#[contract]`, `#[method]`, `#[constructor]`,
+//! `#[fallback]`, and `#[derive(SolType)]`.
+//!
+//! For architecture and usage details, see the
+//! [Proc Macro](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/architecture.md#1-proc-macro) section of the Architecture & Usage Guide.
+
 extern crate proc_macro;
 
 mod codegen;

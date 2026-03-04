@@ -1,3 +1,8 @@
+//! Builder-pattern DSL for PVM smart contracts without proc macros.
+//!
+//! For usage examples and architecture details, see the
+//! [Builder DSL](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/architecture.md#2-builder-dsl-explicit-control) section of the Architecture & Usage Guide.
+
 #![no_std]
 
 pub use pallet_revive_uapi;

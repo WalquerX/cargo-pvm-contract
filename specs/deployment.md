@@ -49,12 +49,14 @@ cast send \
 Convert the `.polkavm` bytecode to hex and deploy with `cast`:
 
 ```bash
+RPC=http://127.0.0.1:8545
+
 # Convert binary to hex
 BYTECODE=0x$(xxd -p target/my_contract.release.polkavm | tr -d '\n')
 
 # Deploy (sends a create transaction with the bytecode)
 cast send \
-  --rpc-url https://services.polkadothub-rpc.com/testnet \
+  --rpc-url $RPC \
   --private-key $PRIVATE_KEY \
   --gas-limit 9999999999999 \
   --create $BYTECODE
@@ -69,7 +71,7 @@ To deploy with constructor arguments, append ABI-encoded args to the bytecode:
 CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(uint256)" 1000000)
 
 cast send \
-  --rpc-url https://services.polkadothub-rpc.com/testnet \
+  --rpc-url $RPC \
   --private-key $PRIVATE_KEY \
   --create ${BYTECODE}${CONSTRUCTOR_ARGS}
 
@@ -77,7 +79,7 @@ cast send \
 CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(address,string)" 0xYourAddress "MyToken")
 
 cast send \
-  --rpc-url https://services.polkadothub-rpc.com/testnet \
+  --rpc-url $RPC \
   --private-key $PRIVATE_KEY \
   --create ${BYTECODE}${CONSTRUCTOR_ARGS}
 ```
@@ -88,7 +90,7 @@ Use `cast call` for read-only queries (no gas cost). Use `--from` to set the cal
 
 ```bash
 CONTRACT=0x<deployed-address>
-RPC=https://services.polkadothub-rpc.com/testnet
+RPC=http://127.0.0.1:8545
 FROM=0xYourAddress
 
 # totalSupply() → uint256
@@ -118,6 +120,59 @@ cast send $CONTRACT "mint(address,uint256)" 0xRecipient 1000000 \
 
 ```bash
 # Get Transfer events from recent blocks
+cast logs --from-block latest --address $CONTRACT \
+  "Transfer(address,address,uint256)" \
+  --rpc-url $RPC
+```
+
+## Deploying on Polkadot Testnet
+
+Paseo is the Polkadot testnet with `pallet-revive` support for smart contracts.
+
+### 1. Generate an Ethereum-compatible account
+
+Use any Ethereum wallet (e.g. MetaMask) to generate an account, or use `cast`:
+
+```bash
+cast wallet new
+```
+
+Save the private key and address.
+
+### 2. Get testnet tokens
+
+Request free PAS tokens from the [Polkadot Faucet](https://faucet.polkadot.io/). Enter your address, complete the captcha, and submit.
+
+### 3. Deploy
+
+```bash
+RPC=https://eth-rpc-testnet.polkadot.io/
+BYTECODE=0x$(xxd -p target/my_contract.release.polkavm | tr -d '\n')
+
+cast send \
+  --rpc-url $RPC \
+  --private-key $PRIVATE_KEY \
+  --gas-limit 5000000 \
+  --create $BYTECODE
+```
+
+The transaction receipt contains the deployed contract address.
+
+### 4. Interact
+
+```bash
+CONTRACT=0x<deployed-address>
+RPC=https://eth-rpc-testnet.polkadot.io/
+
+# Read
+cast call $CONTRACT "totalSupply()(uint256)" --rpc-url $RPC --from 0xYourAddress
+
+# Write
+cast send $CONTRACT "transfer(address,uint256)" 0xRecipient 1000 \
+  --rpc-url $RPC \
+  --private-key $PRIVATE_KEY
+
+# Check events
 cast logs --from-block latest --address $CONTRACT \
   "Transfer(address,address,uint256)" \
   --rpc-url $RPC
