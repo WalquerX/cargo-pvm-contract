@@ -7,6 +7,7 @@ members = [
     "crates/pvm-bump-allocator",
     "crates/pvm-contract-benchmarks",
     "crates/pvm-contract-builder-dsl",
+    "crates/pvm-contract-e2e-tests",
 ]
 resolver = "2"
 

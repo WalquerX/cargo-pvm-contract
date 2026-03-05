@@ -136,11 +136,11 @@ fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStre
     }
 
     if outputs.len() == 1 {
-        let encode = generate_encode(
-            &outputs[0],
-            quote!(::core::convert::Into::into(result)),
-            use_alloc,
-        );
+        let value_expr = match &outputs[0] {
+            SolType::FixedArray(..) | SolType::Tuple(..) => quote!(result),
+            _ => quote!(::core::convert::Into::into(result)),
+        };
+        let encode = generate_encode(&outputs[0], value_expr, use_alloc);
         return quote! {
             let encoded = #encode;
             pallet_revive_uapi::HostFnImpl::return_value(
@@ -178,6 +178,23 @@ fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStre
 
 fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
     if outputs.len() == 1 {
+        // DynBytes needs special handling: Vec<u8> as `bytes` must be encoded as
+        // raw bytes (offset + length + data), not as uint8[] array of 32-byte words.
+        if matches!(&outputs[0], SolType::DynBytes) {
+            let encode_tail = generate_dynamic_value_encode(&outputs[0], quote!(result));
+            return quote! {{
+                let tail_data = #encode_tail;
+                let mut buf = alloc::vec::Vec::with_capacity(32 + tail_data.len());
+                let offset_value = ruint::aliases::U256::from(32u64);
+                let mut offset_buf = [0u8; 32];
+                <ruint::aliases::U256 as ::pvm_contract_types::SolEncode>::encode_to(
+                    &offset_value, &mut offset_buf);
+                buf.extend_from_slice(&offset_buf);
+                buf.extend_from_slice(&tail_data);
+                pallet_revive_uapi::HostFnImpl::return_value(
+                    pallet_revive_uapi::ReturnFlags::empty(), &buf);
+            }};
+        }
         return quote! {{
             let len = ::pvm_contract_types::SolEncode::encode_len(&result);
             let mut buf = alloc::vec![0u8; len];

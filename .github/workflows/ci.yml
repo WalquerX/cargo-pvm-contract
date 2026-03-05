@@ -25,6 +25,12 @@ jobs:
           -o solc
           chmod +x solc
           sudo mv solc /usr/local/bin/solc
+      - name: Install anvil-polkadot
+        run: |
+          export FOUNDRY_DIR="$HOME/.foundry"
+          curl -L https://raw.githubusercontent.com/paritytech/foundry-polkadot/refs/heads/master/foundryup/install | bash
+          "$FOUNDRY_DIR/bin/foundryup-polkadot"
+          echo "$FOUNDRY_DIR/bin" >> $GITHUB_PATH
       - name: Install Rust nightly for scaffold tests
         run: |
           rustup toolchain install nightly-2026-02-01 --component rust-src --profile minimal
@@ -36,6 +42,8 @@ jobs:
         run: cargo test -p pvm-contract-types --features alloc && cargo test -p pvm-contract-macros
       - name: Run integration tests
         run: cargo test -p cargo-pvm-contract -- --test-threads=1
+      - name: Run e2e tests
+        run: cargo test -p pvm-contract-e2e-tests -- --test-threads=1
 
   check-examples:
     runs-on: ubuntu-latest
