@@ -6,7 +6,7 @@
 //! Each test starts its own anvil-polkadot node on a unique port for full isolation.
 //!
 //! Requirements: nightly + rust-src + solc + anvil-polkadot + cast
-//! Run: cargo test -p pvm-contract-e2e-tests --test e2e_tests -- --ignored --test-threads=1
+//! Run: cargo test -p pvm-contract-e2e-tests --test e2e_tests -- --test-threads=1
 
 use pvm_contract_e2e_tests::anvil::AnvilPolkadot;
 use pvm_contract_e2e_tests::build::contract;
@@ -41,7 +41,6 @@ fn deploy_mytoken() -> (AnvilPolkadot, CastClient, String) {
 // --- Dispatch: generated selector routing works on-chain ---
 
 #[test]
-#[ignore] // Requires anvil-polkadot + cast
 fn dispatch_routes_view_selectors_correctly() {
     let (_anvil, cast, address) = deploy_mytoken();
 
@@ -53,7 +52,6 @@ fn dispatch_routes_view_selectors_correctly() {
 }
 
 #[test]
-#[ignore]
 fn dispatch_routes_write_selectors_correctly() {
     let (_anvil, cast, address) = deploy_mytoken();
 
@@ -84,7 +82,6 @@ fn dispatch_routes_write_selectors_correctly() {
 }
 
 #[test]
-#[ignore]
 fn dispatch_fallback_handles_unknown_selector() {
     let c = mytoken();
     c.build();
@@ -114,7 +111,6 @@ fn dispatch_fallback_handles_unknown_selector() {
 }
 
 #[test]
-#[ignore]
 fn dispatch_revert_propagates_on_underflow() {
     let (_anvil, cast, address) = deploy_mytoken();
 
@@ -130,7 +126,6 @@ fn dispatch_revert_propagates_on_underflow() {
 }
 
 #[test]
-#[ignore]
 fn all_variants_deploy_and_respond_to_selectors() {
     for variant in ALL_VARIANTS {
         let (_anvil, cast, address) = deploy_variant(variant);

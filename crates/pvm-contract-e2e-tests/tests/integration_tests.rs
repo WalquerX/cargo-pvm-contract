@@ -13,7 +13,6 @@ fn deploy(binary_name: &str) -> (AnvilPolkadot, CastClient, String) {
 }
 
 #[test]
-#[ignore]
 fn flipper_toggle_state() {
     let (_anvil, cast, addr) = deploy("flipper");
 
@@ -30,7 +29,6 @@ fn flipper_toggle_state() {
 }
 
 #[test]
-#[ignore]
 fn storage_u8_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -40,7 +38,6 @@ fn storage_u8_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_u16_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -50,7 +47,6 @@ fn storage_u16_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_u32_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -65,7 +61,6 @@ fn storage_u32_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_u64_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -80,7 +75,6 @@ fn storage_u64_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_u128_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -95,7 +89,6 @@ fn storage_u128_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_u256_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
     let big = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
@@ -106,7 +99,6 @@ fn storage_u256_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_bool_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
 
@@ -116,7 +108,6 @@ fn storage_bool_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_address_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
     let target = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
@@ -127,7 +118,6 @@ fn storage_address_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn storage_bytes32_roundtrip() {
     let (_anvil, cast, addr) = deploy("storage-types");
     let val_hex = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
@@ -143,7 +133,6 @@ fn storage_bytes32_roundtrip() {
 }
 
 #[test]
-#[ignore]
 fn return_pair_tuple() {
     let (_anvil, cast, addr) = deploy("return-values");
 
@@ -156,7 +145,6 @@ fn return_pair_tuple() {
 }
 
 #[test]
-#[ignore]
 fn return_triple_tuple() {
     let (_anvil, cast, addr) = deploy("return-values");
 
@@ -172,7 +160,6 @@ fn return_triple_tuple() {
 }
 
 #[test]
-#[ignore]
 fn return_identity_passthrough() {
     let (_anvil, cast, addr) = deploy("return-values");
 
@@ -181,7 +168,6 @@ fn return_identity_passthrough() {
 }
 
 #[test]
-#[ignore]
 fn caller_returns_sender() {
     let (_anvil, cast, addr) = deploy("caller-check");
 
@@ -194,7 +180,6 @@ fn caller_returns_sender() {
 }
 
 #[test]
-#[ignore]
 fn caller_record_and_read() {
     let (_anvil, cast, addr) = deploy("caller-check");
 
@@ -208,7 +193,6 @@ fn caller_record_and_read() {
 }
 
 #[test]
-#[ignore]
 fn error_will_revert() {
     let (_anvil, cast, addr) = deploy("error-handling");
 
@@ -217,7 +201,6 @@ fn error_will_revert() {
 }
 
 #[test]
-#[ignore]
 fn error_will_succeed() {
     let (_anvil, cast, addr) = deploy("error-handling");
 
@@ -226,7 +209,6 @@ fn error_will_succeed() {
 }
 
 #[test]
-#[ignore]
 fn error_guarded_rejects_zero() {
     let (_anvil, cast, addr) = deploy("error-handling");
 
@@ -235,7 +217,6 @@ fn error_guarded_rejects_zero() {
 }
 
 #[test]
-#[ignore]
 fn error_guarded_accepts_nonzero() {
     let (_anvil, cast, addr) = deploy("error-handling");
 
@@ -245,7 +226,6 @@ fn error_guarded_accepts_nonzero() {
 }
 
 #[test]
-#[ignore]
 fn events_value_changed() {
     let (_anvil, cast, addr) = deploy("events");
 
@@ -259,7 +239,6 @@ fn events_value_changed() {
 }
 
 #[test]
-#[ignore]
 fn multi_method_add() {
     let (_anvil, cast, addr) = deploy("multi-method");
 
@@ -268,7 +247,6 @@ fn multi_method_add() {
 }
 
 #[test]
-#[ignore]
 fn multi_method_mul() {
     let (_anvil, cast, addr) = deploy("multi-method");
 
@@ -277,7 +255,6 @@ fn multi_method_mul() {
 }
 
 #[test]
-#[ignore]
 fn multi_method_is_zero() {
     let (_anvil, cast, addr) = deploy("multi-method");
 
@@ -289,7 +266,6 @@ fn multi_method_is_zero() {
 }
 
 #[test]
-#[ignore]
 fn multi_method_counter() {
     let (_anvil, cast, addr) = deploy("multi-method");
 
@@ -311,7 +287,6 @@ fn multi_method_counter() {
 // --- Dynamic Types ---
 
 #[test]
-#[ignore]
 fn dynamic_string_length() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -320,7 +295,6 @@ fn dynamic_string_length() {
 }
 
 #[test]
-#[ignore]
 fn dynamic_echo_string() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -331,7 +305,6 @@ fn dynamic_echo_string() {
 }
 
 #[test]
-#[ignore]
 fn dynamic_bytes_length() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -340,7 +313,6 @@ fn dynamic_bytes_length() {
 }
 
 #[test]
-#[ignore]
 fn dynamic_echo_bytes() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -349,7 +321,6 @@ fn dynamic_echo_bytes() {
 }
 
 #[test]
-#[ignore]
 fn dynamic_sum_array() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -358,7 +329,6 @@ fn dynamic_sum_array() {
 }
 
 #[test]
-#[ignore]
 fn dynamic_get_array() {
     let (_anvil, cast, addr) = deploy("dynamic-types");
 
@@ -373,7 +343,6 @@ fn dynamic_get_array() {
 // --- Composite Types ---
 
 #[test]
-#[ignore]
 fn composite_sum_fixed_array() {
     let (_anvil, cast, addr) = deploy("composite-types");
 
@@ -382,7 +351,6 @@ fn composite_sum_fixed_array() {
 }
 
 #[test]
-#[ignore]
 fn composite_get_fixed_array() {
     let (_anvil, cast, addr) = deploy("composite-types");
 
@@ -394,7 +362,6 @@ fn composite_get_fixed_array() {
 }
 
 #[test]
-#[ignore]
 fn composite_tuple_true() {
     let (_anvil, cast, addr) = deploy("composite-types");
 
@@ -407,7 +374,6 @@ fn composite_tuple_true() {
 }
 
 #[test]
-#[ignore]
 fn composite_tuple_false() {
     let (_anvil, cast, addr) = deploy("composite-types");
 
