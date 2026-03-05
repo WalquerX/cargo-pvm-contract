@@ -28,6 +28,7 @@ jobs:
       - name: Install anvil-polkadot
         run: |
           curl -L https://raw.githubusercontent.com/paritytech/foundry-polkadot/refs/heads/master/foundryup/install | bash
+          source /home/runner/.bashrc
           foundryup-polkadot
       - name: Install Rust nightly for scaffold tests
         run: |
