@@ -27,9 +27,10 @@ jobs:
           sudo mv solc /usr/local/bin/solc
       - name: Install anvil-polkadot
         run: |
+          export FOUNDRY_DIR="$HOME/.foundry"
           curl -L https://raw.githubusercontent.com/paritytech/foundry-polkadot/refs/heads/master/foundryup/install | bash
-          ~/.foundry/bin/foundryup-polkadot
-          echo "$HOME/.foundry/bin" >> $GITHUB_PATH
+          "$FOUNDRY_DIR/bin/foundryup-polkadot"
+          echo "$FOUNDRY_DIR/bin" >> $GITHUB_PATH
       - name: Install Rust nightly for scaffold tests
         run: |
           rustup toolchain install nightly-2026-02-01 --component rust-src --profile minimal
