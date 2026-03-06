@@ -1,3 +1,5 @@
+#![doc = include_str!("../../../specs/proc-macros.md")]
+
 extern crate proc_macro;
 
 mod codegen;
@@ -285,7 +287,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///
 /// ### `allocator = "bump"`
 ///
-/// Uses the [`pvm-bump-allocator`] crate, a simple bump allocator for PVM
+/// Uses the `pvm-bump-allocator` crate, a simple bump allocator for PVM
 /// smart contracts (based on the ink! bump allocator). Heap size defaults
 /// to 1024 bytes and can be changed with `allocator_size`:
 ///
