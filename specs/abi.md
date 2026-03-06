@@ -44,7 +44,7 @@ All values are encoded as 32-byte words, big-endian, right-aligned (for integers
 Static types occupy exactly 32 bytes in the calldata (except for packed fixed arrays/tuples).
 
 #### Address
-```
+```text
 Calldata: [00 00 00 00 00 00 00 00 00 00 00 00 XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX XX]
                                               └─────────────────── 20 bytes ───────────────────────────┘
 ```
@@ -56,7 +56,7 @@ addr
 ```
 
 #### Boolean
-```
+```text
 Calldata: [00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 XX]
                                                                                                       └─ 0 or 1
 ```
@@ -93,7 +93,7 @@ i32::from_be_bytes(input[offset + 28..offset + 32].try_into().unwrap())
 #### Fixed Bytes (`bytes1` to `bytes32`)
 
 Left-aligned, zero-padded on the right:
-```
+```text
 Calldata for bytes4: [XX XX XX XX 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00]
                       └─ 4 bytes ─┘
 ```
@@ -224,7 +224,7 @@ out[..N].copy_from_slice(&value);
 
 ### Dynamic Types
 
-Dynamic types (String, Vec<T>) are supported for return values in alloc mode:
+Dynamic types (`String`, `Vec<T>`) are supported for return values in alloc mode:
 ```rust
 #[pvm_contract::method]
 pub fn get_name() -> String {

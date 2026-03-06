@@ -1,8 +1,4 @@
-//! Proc macros for PVM smart contracts — `#[contract]`, `#[method]`, `#[constructor]`,
-//! `#[fallback]`, and `#[derive(SolType)]`.
-//!
-//! For architecture and usage details, see the
-//! [Proc Macro](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/architecture.md#1-proc-macro) section of the Architecture & Usage Guide.
+#![doc = include_str!("../../../specs/proc-macros.md")]
 
 extern crate proc_macro;
 
@@ -291,7 +287,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///
 /// ### `allocator = "bump"`
 ///
-/// Uses the [`pvm-bump-allocator`] crate, a simple bump allocator for PVM
+/// Uses the `pvm-bump-allocator` crate, a simple bump allocator for PVM
 /// smart contracts (based on the ink! bump allocator). Heap size defaults
 /// to 1024 bytes and can be changed with `allocator_size`:
 ///

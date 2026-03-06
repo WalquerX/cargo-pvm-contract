@@ -1,7 +1,4 @@
-//! ABI encoding/decoding traits (`SolEncode`, `SolDecode`) for PVM smart contracts — `no_std` compatible.
-//!
-//! For the full type mapping and encoding specification, see the
-//! [ABI Specification](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/abi.md).
+#![doc = include_str!("../../../specs/abi.md")]
 
 #![no_std]
 

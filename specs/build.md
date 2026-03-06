@@ -37,7 +37,7 @@ Interactive prompts depend on the init type chosen:
 
 This generates a ready-to-build project:
 
-```
+```text
 my_contract/
 ├── Cargo.toml            Dependencies + optimized release profile
 ├── build.rs              Invokes PvmBuilder (PolkaVM linking + ABI generation)
@@ -59,7 +59,7 @@ cargo build --release
 
 Output:
 
-```
+```text
 target/my_contract.release.polkavm    — deployable bytecode
 target/my_contract.release.abi.json   — Ethereum-compatible ABI (macro style only)
 ```
@@ -68,7 +68,7 @@ That's it. The generated project includes all necessary configuration — no ext
 
 ## What Happens Under the Hood
 
-```
+```text
 Rust Source (.rs)
     │  #[contract], #[method] macros expand at compile time
     │  → selector computation, dispatch logic, ABI encode/decode

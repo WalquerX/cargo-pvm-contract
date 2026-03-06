@@ -1,18 +1,4 @@
-//! # PolkaVM Contract Builder
-//!
-//! A utility for building Rust projects as PolkaVM bytecode.
-//!
-//! ## Usage in `build.rs`
-//!
-//! ```no_run
-//! cargo_pvm_contract_builder::PvmBuilder::new().build();
-//! ```
-//!
-//! For build pipeline details, see the
-//! [Build Specification](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/build.md).
-//!
-//! For deployment instructions, see the
-//! [Deployment Guide](https://github.com/paritytech/cargo-pvm-contract/blob/main/specs/deployment.md).
+#![doc = include_str!("../../../specs/build.md")]
 
 mod abi;
 
