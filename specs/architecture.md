@@ -8,7 +8,7 @@ Contracts use the **Ethereum ABI** (Keccak-256 selectors, Solidity-compatible en
 
 ## Workspace Crates
 
-```
+```text
 cargo-pvm-contract/
 ├── cargo-pvm-contract          CLI tool — scaffolds new contract projects
 ├── cargo-pvm-contract-builder  Build helper — invoked from build.rs, links PolkaVM bytecode + emits ABI JSON

@@ -2,7 +2,7 @@
 
 After building, you get two artifacts:
 
-```
+```text
 target/my_contract.release.polkavm    — deployable bytecode
 target/my_contract.release.abi.json   — Ethereum-compatible ABI JSON
 ```

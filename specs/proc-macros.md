@@ -4,7 +4,7 @@ Annotate a module with `#[contract]` and functions with `#[method]`. The macro g
 
 ## Basic Usage
 
-```rust
+```rust,ignore
 #![no_main]
 #![no_std]
 
@@ -60,7 +60,7 @@ interface Counter {
 
 **Without a .sol file** — selectors are inferred from Rust function signatures. Rust `snake_case` names are converted to `camelCase` for the Solidity signature:
 
-```rust
+```rust,ignore
 #[pvm_contract_macros::contract]
 mod counter {
     #[pvm_contract_macros::method]
@@ -77,7 +77,7 @@ Contracts run in `no_std`. If you need heap allocation (`Vec`, `String`), you mu
 
 Stack-only. Calldata is read into a fixed-size buffer. Only static return types allowed. Smallest binary size.
 
-```rust
+```rust,ignore
 #[pvm_contract_macros::contract("Counter.sol", buffer = 256)]
 mod counter { ... }
 ```
@@ -86,7 +86,7 @@ mod counter { ... }
 
 Simple bump allocator from `pvm-bump-allocator`. Never frees memory (fine for short-lived contract calls). Based on ink!'s allocator design.
 
-```rust
+```rust,ignore
 #[pvm_contract_macros::contract("Counter.sol", allocator = "bump")]
 mod counter { ... }
 
@@ -99,7 +99,7 @@ mod counter { ... }
 
 Third-party allocator with actual free support. Slightly larger binary.
 
-```rust
+```rust,ignore
 #[pvm_contract_macros::contract("Counter.sol", allocator = "pico", allocator_size = 2048)]
 mod counter { ... }
 ```
@@ -129,7 +129,7 @@ If no selector matches, the `#[fallback]` handler runs.
 
 There is no storage abstraction. You interact with the host directly:
 
-```rust
+```rust,ignore
 use pallet_revive_uapi::{HostFnImpl as api, StorageFlags};
 
 // Write a value
@@ -148,7 +148,7 @@ match api::get_storage(StorageFlags::empty(), &key, &mut slice) {
 
 Also manual — construct topic arrays and call the host:
 
-```rust
+```rust,ignore
 // keccak256("Incremented(uint256)")
 const INCREMENTED_EVENT_SIG: [u8; 32] = [
     0xe4, 0x8d, 0x01, 0x33, 0xf3, 0xb5, 0xf8, 0x87,
@@ -169,7 +169,7 @@ fn emit_incremented(new_value: U256) {
 
 Methods can return `Result<T, Error>` or plain `T`:
 
-```rust
+```rust,ignore
 // Fallible — Err reverts the transaction with the error message
 #[pvm_contract_macros::method]
 pub fn decrement() -> Result<(), Error> {
@@ -191,7 +191,7 @@ pub fn get_value() -> U256 {
 
 The `Error` enum must implement `AsRef<[u8]>` so the macro can serialize it on revert:
 
-```rust
+```rust,ignore
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     Underflow,
@@ -210,7 +210,7 @@ impl AsRef<[u8]> for Error {
 
 Use `#[derive(SolType)]` to make structs usable as method parameters or return types:
 
-```rust
+```rust,ignore
 #[derive(pvm_contract_macros::SolType)]
 pub struct Point {
     pub x: U256,

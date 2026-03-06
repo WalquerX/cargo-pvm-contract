@@ -49,7 +49,7 @@ Calldata: [00 00 00 00 00 00 00 00 00 00 00 00 XX XX XX XX XX XX XX XX XX XX XX 
                                               └─────────────────── 20 bytes ───────────────────────────┘
 ```
 Decoded by extracting bytes 12-32:
-```rust
+```rust,ignore
 let mut addr = [0u8; 20];
 addr.copy_from_slice(&input[offset + 12..offset + 32]);
 addr
@@ -61,7 +61,7 @@ Calldata: [00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
                                                                                                       └─ 0 or 1
 ```
 Decoded by checking the last byte:
-```rust
+```rust,ignore
 input[offset + 31] != 0
 ```
 
@@ -79,14 +79,14 @@ All unsigned integers are right-aligned in the 32-byte word:
 | `uint256` | 32 | bytes 0-31 |
 
 Example for `uint32`:
-```rust
+```rust,ignore
 u32::from_be_bytes(input[offset + 28..offset + 32].try_into().unwrap())
 ```
 
 #### Signed Integers
 
 Same layout as unsigned, but interpreted as two's complement:
-```rust
+```rust,ignore
 i32::from_be_bytes(input[offset + 28..offset + 32].try_into().unwrap())
 ```
 
@@ -97,7 +97,7 @@ Left-aligned, zero-padded on the right:
 Calldata for bytes4: [XX XX XX XX 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00]
                       └─ 4 bytes ─┘
 ```
-```rust
+```rust,ignore
 let mut bytes = [0u8; 4];
 bytes.copy_from_slice(&input[offset..offset + 4]);
 ```
@@ -107,14 +107,14 @@ bytes.copy_from_slice(&input[offset..offset + 4]);
 Dynamic types store an offset pointer in the head section, with actual data in the tail.
 
 #### Layout
-```
+```text
 Head: [offset to data (32 bytes)]
 ...
 Tail: [length (32 bytes)][actual data (length bytes, padded to 32)]
 ```
 
 #### Dynamic Bytes (`bytes`)
-```rust
+```rust,ignore
 let dyn_offset = U256::from_be_slice(&input[offset..offset + 32]).as_limbs()[0] as usize;
 let length = U256::from_be_slice(&input[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
 // alloc mode:
@@ -125,7 +125,7 @@ input[dyn_offset + 32..dyn_offset + 32 + length].to_vec()
 
 #### String
 Same as `bytes`, but converted to UTF-8:
-```rust
+```rust,ignore
 // alloc mode:
 String::from_utf8_lossy(bytes).into_owned()
 // no_alloc mode:
@@ -136,7 +136,7 @@ core::str::from_utf8(bytes).unwrap_or("")
 
 **Only supported in alloc mode.**
 
-```rust
+```rust,ignore
 let dyn_offset = U256::from_be_slice(&input[offset..offset + 32]).as_limbs()[0] as usize;
 let length = U256::from_be_slice(&input[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
 let array_data = &input[dyn_offset + 32..];
@@ -152,12 +152,12 @@ for i in 0..length {
 #### Fixed Arrays (`T[N]`)
 
 Elements are concatenated without length prefix:
-```
+```text
 [element_0 (32 bytes)][element_1 (32 bytes)]...[element_N-1 (32 bytes)]
 ```
 
 Each element is decoded at its respective offset:
-```rust
+```rust,ignore
 [
     decode(&input, offset + 0 * 32),
     decode(&input, offset + 1 * 32),
@@ -169,7 +169,7 @@ Each element is decoded at its respective offset:
 
 Static tuples: elements concatenated sequentially.
 
-```rust
+```rust,ignore
 (
     decode_T1(&input, offset),
     decode_T2(&input, offset + T1::head_size()),
@@ -182,13 +182,13 @@ Static tuples: elements concatenated sequentially.
 ### Static Types
 
 #### Address
-```rust
+```rust,ignore
 let mut out = [0u8; 32];
 out[12..32].copy_from_slice(&address);
 ```
 
 #### Boolean
-```rust
+```rust,ignore
 let mut out = [0u8; 32];
 out[31] = if value { 1 } else { 0 };
 ```
@@ -196,7 +196,7 @@ out[31] = if value { 1 } else { 0 };
 #### Unsigned Integers
 
 Right-aligned in 32 bytes:
-```rust
+```rust,ignore
 // uint32 example
 let mut out = [0u8; 32];
 out[28..32].copy_from_slice(&value.to_be_bytes());
@@ -208,7 +208,7 @@ value.to_be_bytes::<32>()
 #### Signed Integers
 
 Two's complement, sign-extended:
-```rust
+```rust,ignore
 // int32 example
 let mut out = if value < 0 { [0xff; 32] } else { [0u8; 32] };
 out[28..32].copy_from_slice(&value.to_be_bytes());
@@ -217,7 +217,7 @@ out[28..32].copy_from_slice(&value.to_be_bytes());
 #### Fixed Bytes
 
 Left-aligned:
-```rust
+```rust,ignore
 let mut out = [0u8; 32];
 out[..N].copy_from_slice(&value);
 ```
@@ -225,7 +225,7 @@ out[..N].copy_from_slice(&value);
 ### Dynamic Types
 
 Dynamic types (`String`, `Vec<T>`) are supported for return values in alloc mode:
-```rust
+```rust,ignore
 #[pvm_contract::method]
 pub fn get_name() -> String {
     "hello".to_string()
@@ -238,7 +238,7 @@ In no_alloc mode, returning a dynamic type will cause a compile error.
 #### Fixed Arrays
 
 Each element encoded and concatenated:
-```rust
+```rust,ignore
 // alloc mode
 let mut out = Vec::with_capacity(N * 32);
 for elem in array {
@@ -257,7 +257,7 @@ for elem in array {
 #### Static Tuples
 
 Elements concatenated:
-```rust
+```rust,ignore
 let mut out = [0u8; TOTAL_SIZE];
 let mut offset = 0;
 out[offset..offset + 32].copy_from_slice(&encode(tuple.0));
@@ -278,7 +278,7 @@ out[offset..offset + 32].copy_from_slice(&encode(tuple.1));
 
 Custom structs are supported via the `SolType` derive macro. This generates `SolEncode`, `SolDecode`, and (for static-only structs) `StaticEncodedLen` implementations.
 
-```rust
+```rust,ignore
 #[derive(pvm_contract_macros::SolType)]
 pub struct Point {
     pub x: U256,
@@ -292,7 +292,7 @@ This generates:
 - `SolDecode` impl with `decode`, `decode_at`
 
 Use in contract methods:
-```rust
+```rust,ignore
 #[pvm_contract_macros::method]
 pub fn set_point(point: Point) {
     // point.x, point.y are available
@@ -309,7 +309,7 @@ pub fn get_point() -> Point {
 Structs with only static fields generate `StaticEncodedLen` and can be returned in both alloc and no_alloc modes.
 Structs with any dynamic field (String, Vec) are dynamic and can only be returned in alloc mode.
 
-```rust
+```rust,ignore
 #[derive(pvm_contract_macros::SolType)]
 pub struct User {
     pub name: String,
@@ -338,7 +338,7 @@ Note: `&str` implements `SolEncode` but not `SolDecode` (borrowed types cannot b
 #### Alternative: Tuples
 
 You can also use tuples directly without defining a struct:
-```rust
+```rust,ignore
 #[pvm_contract_macros::method]
 pub fn set_point(p: (U256, U256)) {
     let (x, y) = p;
@@ -349,7 +349,7 @@ pub fn set_point(p: (U256, U256)) {
 
 The macro generates size checks before decoding:
 
-```rust
+```rust,ignore
 let min_size = sum of head_size() for all parameters;
 if input.len() < min_size {
     return_value(REVERT, b"InvalidCalldata");
@@ -371,14 +371,14 @@ function transfer(address to, uint256 amount) external;
 ```
 
 Input layout (68 bytes total = 4 selector + 64 data):
-```
+```text
 [selector: 4 bytes]
 [to: 32 bytes, address right-aligned]
 [amount: 32 bytes, uint256]
 ```
 
 Generated decode:
-```rust
+```rust,ignore
 let to = {
     let mut addr = [0u8; 20];
     addr.copy_from_slice(&input[12..32]);
@@ -394,7 +394,7 @@ function balanceOf(address account) external view returns (uint256);
 ```
 
 Generated encode for return:
-```rust
+```rust,ignore
 let encoded = result.to_be_bytes::<32>();
 return_value(ReturnFlags::empty(), &encoded);
 ```
@@ -406,7 +406,7 @@ function setScores(uint256[3] scores) external;
 ```
 
 Input layout (100 bytes = 4 + 96):
-```
+```text
 [selector: 4 bytes]
 [scores[0]: 32 bytes]
 [scores[1]: 32 bytes]
@@ -414,7 +414,7 @@ Input layout (100 bytes = 4 + 96):
 ```
 
 Generated decode:
-```rust
+```rust,ignore
 let scores = [
     U256::from_be_slice(&input[0..32]),
     U256::from_be_slice(&input[32..64]),

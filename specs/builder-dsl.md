@@ -4,7 +4,7 @@ A non-macro alternative to `#[contract]`. You wire up dispatch manually using `C
 
 ## Basic Usage
 
-```rust
+```rust,ignore
 #![no_main]
 #![no_std]
 
@@ -75,7 +75,7 @@ With the DSL you define these explicitly. Inside `call()`, `ContractBuilder::dis
 
 There is no storage abstraction. You interact with the host directly:
 
-```rust
+```rust,ignore
 use pallet_revive_uapi::{HostFnImpl as api, StorageFlags};
 
 // Write a value
@@ -94,7 +94,7 @@ match api::get_storage(StorageFlags::empty(), &key, &mut slice) {
 
 Also manual — construct topic arrays and call the host:
 
-```rust
+```rust,ignore
 // keccak256("Incremented(uint256)")
 const INCREMENTED_EVENT_SIG: [u8; 32] = [
     0xe4, 0x8d, 0x01, 0x33, 0xf3, 0xb5, 0xf8, 0x87,
