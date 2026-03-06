@@ -124,6 +124,7 @@ pub(super) struct ParsedContract {
     pub(super) has_fallback: bool,
     pub(super) constructor_name: Option<Ident>,
     pub(super) constructor_returns_result: bool,
+    pub(super) constructor_inputs: Vec<(Ident, SolType)>,
     pub(super) fallback_name: Option<Ident>,
 }
 
@@ -270,6 +271,7 @@ fn parse_contract(
     let mut has_fallback = false;
     let mut constructor_name = None;
     let mut constructor_returns_result = false;
+    let mut constructor_inputs = Vec::new();
     let mut fallback_name = None;
     let mut implemented_sol_methods = Vec::new();
 
@@ -279,6 +281,21 @@ fn parse_contract(
                 has_constructor = true;
                 constructor_name = Some(func.sig.ident.clone());
                 constructor_returns_result = is_result_return_type(&func.sig.output);
+                constructor_inputs = func
+                    .sig
+                    .inputs
+                    .iter()
+                    .filter_map(|arg| {
+                        if let syn::FnArg::Typed(pat_type) = arg
+                            && let syn::Pat::Ident(pat_ident) = &*pat_type.pat
+                        {
+                            let sol_type = SolType::from_rust_type(&pat_type.ty)?;
+                            Some((pat_ident.ident.clone(), sol_type))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
             } else if has_pvm_attr(&func.attrs, "fallback") {
                 has_fallback = true;
                 fallback_name = Some(func.sig.ident.clone());
@@ -362,6 +379,7 @@ fn parse_contract(
         has_fallback,
         constructor_name,
         constructor_returns_result,
+        constructor_inputs,
         fallback_name,
     })
 }

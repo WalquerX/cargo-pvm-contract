@@ -38,13 +38,37 @@ fn generate_abi_gen_main_impl(parsed: &ParsedContract) -> syn::Result<TokenStrea
     };
 
     let constructor_entry = if parsed.has_constructor {
+        let constructor_input_entries: Vec<TokenStream> = parsed
+            .constructor_inputs
+            .iter()
+            .map(|(name, sol_type)| {
+                let name_str = name.to_string();
+                let type_name_expr = generate_sol_type_name_expr(sol_type)?;
+                Ok(quote! {
+                    if !__first_ctor_input {
+                        __abi.push(',');
+                    } else {
+                        __first_ctor_input = false;
+                    }
+                    __abi.push_str("{\"name\":\"");
+                    __abi.push_str(#name_str);
+                    __abi.push_str("\",\"type\":\"");
+                    __abi.push_str(&#type_name_expr);
+                    __abi.push_str("\"}");
+                })
+            })
+            .collect::<syn::Result<Vec<_>>>()?;
+
         quote! {
             if !__first_item {
                 __abi.push(',');
             } else {
                 __first_item = false;
             }
-            __abi.push_str("{\"type\":\"constructor\",\"inputs\":[]}");
+            __abi.push_str("{\"type\":\"constructor\",\"inputs\":[");
+            let mut __first_ctor_input = true;
+            #(#constructor_input_entries)*
+            __abi.push_str("]}");
         }
     } else {
         quote! {}
@@ -262,7 +286,7 @@ mod tests {
         let output = generate_abi_gen_main(&parsed, false).to_string();
 
         assert!(output.contains("cfg (feature = \"abi-gen\")"));
-        assert!(output.contains("{\\\"type\\\":\\\"constructor\\\",\\\"inputs\\\":[]}"));
+        assert!(output.contains("{\\\"type\\\":\\\"constructor\\\",\\\"inputs\\\":["));
         assert!(output.contains("{\\\"type\\\":\\\"function\\\",\\\"name\\\":\\\""));
         assert!(output.contains("__abi . push_str (\"balanceOf\")"));
         assert!(output.contains("__abi . push_str (\"account\")"));
@@ -303,8 +327,43 @@ mod tests {
             has_fallback: false,
             constructor_name: None,
             constructor_returns_result: false,
+            constructor_inputs: vec![],
             fallback_name: None,
         }
+    }
+
+    #[test]
+    fn generates_constructor_with_params() {
+        let parsed = ParsedContract {
+            mod_name: syn::parse_str("contract").unwrap(),
+            methods: vec![],
+            has_constructor: true,
+            has_fallback: false,
+            constructor_name: Some(syn::parse_str("new").unwrap()),
+            constructor_returns_result: false,
+            constructor_inputs: vec![
+                (syn::parse_str("owner").unwrap(), SolType::Address),
+                (syn::parse_str("supply").unwrap(), SolType::Uint(256)),
+            ],
+            fallback_name: None,
+        };
+
+        let output = generate_abi_gen_main(&parsed, false).to_string();
+
+        assert!(output.contains("{\\\"type\\\":\\\"constructor\\\",\\\"inputs\\\":["));
+        assert!(output.contains("\"owner\""));
+        assert!(output.contains("String :: from (\"address\")"));
+        assert!(output.contains("\"supply\""));
+        assert!(output.contains("String :: from (\"uint256\")"));
+    }
+
+    #[test]
+    fn generates_constructor_with_no_params_emits_empty_inputs() {
+        let parsed = parsed_contract(vec![], true);
+        let output = generate_abi_gen_main(&parsed, false).to_string();
+        assert!(output.contains("{\\\"type\\\":\\\"constructor\\\",\\\"inputs\\\":["));
+        // no param entries — the inputs array is empty
+        assert!(!output.contains("\"name\""));
     }
 
     fn method(
