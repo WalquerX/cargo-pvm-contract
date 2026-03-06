@@ -15,7 +15,6 @@
         "anthropic.claude-code",
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "serayuzgur.crates",
         "eamodio.gitlens"
       ],
       "settings": {
@@ -38,7 +37,10 @@
       }
     }
   },
-  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW"
+  ],
   "postCreateCommand": "sudo bash .devcontainer/init-firewall.sh && git config --global --add safe.directory /workspace && printf '{\"permissions\":{\"allow\":[\"Bash(*)\",\"Edit(*)\",\"Write(*)\",\"Read(*)\",\"Glob(*)\",\"Grep(*)\",\"WebFetch(*)\",\"WebSearch(*)\",\"TodoWrite(*)\"]}}' > /home/dev/.claude/settings.json",
   "remoteUser": "dev",
   "mounts": [

@@ -19,16 +19,18 @@ if [ -n "$DOCKER_DNS_RULES" ]; then
     echo "Restoring Docker DNS rules..."
     iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
     iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
-    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
+    printf '*nat\n%s\nCOMMIT\n' "$DOCKER_DNS_RULES" | iptables-restore --noflush
 else
     echo "No Docker DNS rules to restore"
 fi
 
 # First allow DNS and localhost before any restrictions
-# Allow outbound DNS
+# Allow outbound DNS (UDP and TCP)
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-# Allow inbound DNS responses
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+# Allow inbound DNS responses (UDP and TCP)
 iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -A INPUT -p tcp --sport 53 -m state --state ESTABLISHED -j ACCEPT
 # Allow outbound SSH
 iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
 # Allow inbound SSH responses
@@ -94,33 +96,35 @@ for domain in \
 done
 
 # Get host IP from default route
-HOST_IP=$(ip route | grep default | cut -d" " -f3)
+HOST_IP=$(ip route show default | awk 'NR==1 {print $3}')
 if [ -z "$HOST_IP" ]; then
     echo "ERROR: Failed to detect host IP"
     exit 1
 fi
 
-HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
+GW_DEV=$(ip route show default | awk 'NR==1 {print $5}')
+HOST_NETWORK=$(ip -o -f inet addr show dev "$GW_DEV" 2>/dev/null | awk 'NR==1 {print $4}') || true
+[ -z "$HOST_NETWORK" ] && HOST_NETWORK="$HOST_IP/32"
 echo "Host network detected as: $HOST_NETWORK"
 
 # Set up remaining iptables rules
 iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
 iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
 
-# Set default policies to DROP first
-iptables -P INPUT DROP
-iptables -P FORWARD DROP
-iptables -P OUTPUT DROP
-
-# First allow established connections for already approved traffic
+# Allow established connections for already approved traffic
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Then allow only specific outbound traffic to allowed domains
+# Allow only specific outbound traffic to allowed domains
 iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+
+# Set default policies to DROP last, after all ACCEPT rules are in place
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT DROP
 
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."
