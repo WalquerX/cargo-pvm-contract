@@ -3,8 +3,7 @@ use quote::quote;
 use syn::{Attribute, Ident, ItemMod, LitInt, LitStr, Token, parse::Parse, parse::ParseStream};
 
 use super::abi_gen::generate_abi_gen_main;
-use super::decode::{calculate_min_input_size, generate_decode_params, has_custom_types};
-use super::dispatch::{MethodInfo, generate_dispatch_arm};
+use super::dispatch::{MethodInfo, generate_dispatch_arm, generate_param_decoding};
 use crate::signature::{FunctionSignature, SolType};
 use crate::solidity::{SolInterface, parse_solidity_interface, to_snake_case};
 
@@ -492,41 +491,16 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 .map(|(name, _)| name.clone())
                 .collect();
 
-            let min_size = calculate_min_input_size(&sol_types);
-            let decodes = generate_decode_params(&sol_types, use_alloc);
-            let needs_runtime_offset = has_custom_types(&sol_types);
-            let offset_init = if needs_runtime_offset {
-                quote! { let mut __decode_offset: usize = 0; }
-            } else {
-                quote! {}
-            };
-
-            let decode_statements: Vec<_> = std::iter::once(offset_init)
-                .chain(
-                    param_names
-                        .iter()
-                        .zip(decodes.iter())
-                        .map(|(name, decode)| {
-                            quote! { let #name = #decode; }
-                        }),
-                )
-                .collect();
-
-            let call_args: Vec<_> = param_names
-                .iter()
-                .map(|name| quote!(::core::convert::Into::into(#name)))
-                .collect();
+            let decoding = generate_param_decoding(&param_names, &sol_types, use_alloc);
+            let super::dispatch::ParamDecoding { size_check, decode_statements, call_args } = decoding;
 
             let read_calldata = if use_alloc {
                 quote! {
                     let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
                     let mut call_data = vec![0u8; call_data_len];
                     pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data, 0);
-                    if call_data_len < #min_size {
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
-                    }
                     let input = &call_data[..];
+                    #size_check
                 }
             } else {
                 let buffer_size = args.buffer_size;
@@ -538,11 +512,8 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                             pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
                     }
                     pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
-                    if call_data_len < #min_size {
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
-                    }
                     let input = &call_data[..call_data_len];
+                    #size_check
                 }
             };
 
@@ -815,5 +786,30 @@ mod tests {
         // param types are emitted
         assert!(output.contains("\"address\""));
         assert!(output.contains("\"uint256\""));
+    }
+
+    #[test]
+    fn constructor_with_result_and_inputs_generates_match_and_decode() {
+        let item: syn::ItemMod = syn::parse_str(
+            r#"
+            mod my_contract {
+                #[pvm_contract_macros::constructor]
+                pub fn new(owner: Address) -> Result<(), Error> {
+                    Ok(())
+                }
+            }
+        "#,
+        )
+        .unwrap();
+
+        let output = expand_contract(ContractArgs::default(), item)
+            .unwrap()
+            .to_string();
+
+        // Should have decode logic for the input
+        assert!(output.contains("\"owner\""));
+        // Should have match for Result error handling
+        assert!(output.contains("Err (e)"));
+        assert!(output.contains("REVERT"));
     }
 }
