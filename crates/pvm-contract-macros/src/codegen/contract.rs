@@ -256,6 +256,38 @@ fn extract_result_ok_type(ty: &syn::Type) -> Option<syn::Type> {
     None
 }
 
+/// Extract parameter names and Solidity types from a function's inputs.
+///
+/// Shared by constructor and method parsing.
+fn extract_typed_params(
+    inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>,
+) -> syn::Result<Vec<(Ident, SolType)>> {
+    inputs
+        .iter()
+        .map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg {
+                let ident = if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    pat_ident.ident.clone()
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        &pat_type.pat,
+                        "Parameters must be simple identifiers",
+                    ));
+                };
+                let sol_type = SolType::from_rust_type(&pat_type.ty).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &pat_type.ty,
+                        "Cannot map parameter type to a Solidity type",
+                    )
+                })?;
+                Ok((ident, sol_type))
+            } else {
+                Err(syn::Error::new_spanned(arg, "Unexpected `self` parameter"))
+            }
+        })
+        .collect()
+}
+
 fn parse_contract(
     input: &ItemMod,
     sol_interface: Option<&SolInterface>,
@@ -281,52 +313,14 @@ fn parse_contract(
                 has_constructor = true;
                 constructor_name = Some(func.sig.ident.clone());
                 constructor_returns_result = is_result_return_type(&func.sig.output);
-                constructor_inputs = func
-                    .sig
-                    .inputs
-                    .iter()
-                    .map(|arg| {
-                        if let syn::FnArg::Typed(pat_type) = arg {
-                            let ident = if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                                pat_ident.ident.clone()
-                            } else {
-                                return Err(syn::Error::new_spanned(
-                                    &pat_type.pat,
-                                    "Constructor parameters must be simple identifiers",
-                                ));
-                            };
-                            let sol_type =
-                                SolType::from_rust_type(&pat_type.ty).ok_or_else(|| {
-                                    syn::Error::new_spanned(
-                                        &pat_type.ty,
-                                        "Cannot map constructor parameter type to a Solidity type",
-                                    )
-                                })?;
-                            Ok((ident, sol_type))
-                        } else {
-                            Err(syn::Error::new_spanned(
-                                arg,
-                                "Unexpected `self` parameter in constructor",
-                            ))
-                        }
-                    })
-                    .collect::<syn::Result<Vec<_>>>()?;
+                constructor_inputs = extract_typed_params(&func.sig.inputs)?;
             } else if has_pvm_attr(&func.attrs, "fallback") {
                 has_fallback = true;
                 fallback_name = Some(func.sig.ident.clone());
             } else if has_pvm_attr(&func.attrs, "method") {
-                let param_names: Vec<Ident> = func
-                    .sig
-                    .inputs
-                    .iter()
-                    .filter_map(|arg| {
-                        if let syn::FnArg::Typed(pat_type) = arg
-                            && let syn::Pat::Ident(pat_ident) = &*pat_type.pat
-                        {
-                            return Some(pat_ident.ident.clone());
-                        }
-                        None
-                    })
+                let param_names: Vec<Ident> = extract_typed_params(&func.sig.inputs)?
+                    .into_iter()
+                    .map(|(name, _)| name)
                     .collect();
 
                 let returns_result = is_result_return_type(&func.sig.output);
@@ -477,87 +471,69 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
 
     let deploy_fn = if parsed.has_constructor {
         let constructor_name = parsed.constructor_name.as_ref().unwrap();
-        let has_inputs = !parsed.constructor_inputs.is_empty();
 
-        let (read_calldata, decode_and_call) = if has_inputs {
-            let sol_types: Vec<_> = parsed
-                .constructor_inputs
-                .iter()
-                .map(|(_, ty)| ty.clone())
-                .collect();
-            let param_names: Vec<_> = parsed
-                .constructor_inputs
-                .iter()
-                .map(|(name, _)| name.clone())
-                .collect();
+        let sol_types: Vec<_> = parsed
+            .constructor_inputs
+            .iter()
+            .map(|(_, ty)| ty.clone())
+            .collect();
+        let param_names: Vec<_> = parsed
+            .constructor_inputs
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
 
-            let decoding = generate_param_decoding(&param_names, &sol_types, use_alloc);
-            let super::dispatch::ParamDecoding {
-                size_check,
-                decode_statements,
-                call_args,
-            } = decoding;
+        let decoding = generate_param_decoding(&param_names, &sol_types, use_alloc);
+        let super::dispatch::ParamDecoding {
+            size_check,
+            decode_statements,
+            call_args,
+        } = decoding;
 
-            let read_calldata = if use_alloc {
-                quote! {
-                    let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
-                    let mut call_data = vec![0u8; call_data_len];
-                    pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data, 0);
-                    let input = &call_data[..];
-                    #size_check
-                }
-            } else {
-                let buffer_size = args.buffer_size;
-                quote! {
-                    let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
-                    let mut call_data = [0u8; #buffer_size];
-                    if call_data_len > #buffer_size {
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
-                    }
-                    pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
-                    let input = &call_data[..call_data_len];
-                    #size_check
-                }
-            };
-
-            let call_expr = quote! { #mod_name::#constructor_name(#(#call_args),*) };
-            let decode_and_call = if parsed.constructor_returns_result {
-                quote! {
-                    #(#decode_statements)*
-                    match #call_expr {
-                        Ok(()) => {}
-                        Err(e) => {
-                            pallet_revive_uapi::HostFnImpl::return_value(
-                                pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
-                        }
-                    }
-                }
-            } else {
-                quote! {
-                    #(#decode_statements)*
-                    #call_expr;
-                }
-            };
-
-            (read_calldata, decode_and_call)
+        // Constructor calldata has no 4-byte selector prefix (unlike `call()`),
+        // so the entire calldata is ABI-encoded args.
+        let read_calldata = if param_names.is_empty() {
+            quote! {}
+        } else if use_alloc {
+            quote! {
+                let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
+                let mut call_data = vec![0u8; call_data_len];
+                pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data, 0);
+                let input = &call_data[..];
+                #size_check
+            }
         } else {
-            let call_expr = quote! { #mod_name::#constructor_name() };
-            let decode_and_call = if parsed.constructor_returns_result {
-                quote! {
-                    match #call_expr {
-                        Ok(()) => {}
-                        Err(e) => {
-                            pallet_revive_uapi::HostFnImpl::return_value(
-                                pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
-                        }
+            let buffer_size = args.buffer_size;
+            quote! {
+                let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
+                let mut call_data = [0u8; #buffer_size];
+                if call_data_len > #buffer_size {
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+                }
+                pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
+                let input = &call_data[..call_data_len];
+                #size_check
+            }
+        };
+
+        let call_expr = quote! { #mod_name::#constructor_name(#(#call_args),*) };
+        let decode_and_call = if parsed.constructor_returns_result {
+            quote! {
+                #(#decode_statements)*
+                match #call_expr {
+                    Ok(()) => {}
+                    Err(e) => {
+                        pallet_revive_uapi::HostFnImpl::return_value(
+                            pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
                     }
                 }
-            } else {
-                quote! { #call_expr; }
-            };
-
-            (quote! {}, decode_and_call)
+            }
+        } else {
+            quote! {
+                #(#decode_statements)*
+                #call_expr;
+            }
         };
 
         quote! {
@@ -627,7 +603,6 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
             #[polkavm_derive::polkavm_export]
             pub extern "C" fn call() {
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
-
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
                     pallet_revive_uapi::HostFnImpl::return_value(
