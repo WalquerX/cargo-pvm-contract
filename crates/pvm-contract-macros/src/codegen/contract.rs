@@ -256,9 +256,6 @@ fn extract_result_ok_type(ty: &syn::Type) -> Option<syn::Type> {
     None
 }
 
-/// Extract parameter names and Solidity types from a function's inputs.
-///
-/// Shared by constructor and method parsing.
 fn extract_typed_params(
     inputs: &syn::punctuated::Punctuated<syn::FnArg, syn::token::Comma>,
 ) -> syn::Result<Vec<(Ident, SolType)>> {
