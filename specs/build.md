@@ -1,0 +1,101 @@
+# Building Contracts
+
+## Prerequisites
+
+- **Rust 1.92+** (stable) — workspace MSRV
+
+- **Rust nightly** with `rust-src` — needed for `-Zbuild-std` when compiling to PolkaVM
+
+  ```bash
+  rustup toolchain install nightly --component rust-src --profile minimal
+  ```
+
+- **solc 0.8.26+** — only if your contract references a `.sol` interface file
+
+## Scaffold a New Project
+
+```bash
+cargo install cargo-pvm-contract
+cargo install --path crates/cargo-pvm-contract 
+cargo pvm-contract
+```
+
+Interactive prompts depend on the init type chosen:
+
+**New project:**
+
+1. **Contract name**
+2. **API style** — Macro or DSL
+3. **Allocator** — Bump or none
+4. **Solidity interface** — optional `.sol` file for selector generation
+
+**Bundled example** (Fibonacci, MyToken, Multi):
+
+1. **Example** — which example to use
+2. **API style** — Macro or DSL
+3. **Contract name** — defaults to the example name
+
+This generates a ready-to-build project:
+
+```text
+my_contract/
+├── Cargo.toml            Dependencies + optimized release profile
+├── build.rs              Invokes PvmBuilder (PolkaVM linking + ABI generation)
+├── rust-toolchain.toml   Pinned nightly (nightly-2026-02-01)
+├── MyToken.sol           (only if .sol file was provided)
+├── .cargo/
+│   └── config.toml       RISC-V target + build-std configuration
+├── src/
+│   └── my_contract.rs    Contract source (macro or DSL)
+└── .gitignore
+```
+
+## Build
+
+```bash
+cd my_contract
+cargo build --release
+```
+
+Output:
+
+```text
+target/my_contract.release.polkavm    — deployable bytecode
+target/my_contract.release.abi.json   — Ethereum-compatible ABI (macro style only)
+```
+
+That's it. The generated project includes all necessary configuration — no extra flags needed.
+
+## What Happens Under the Hood
+
+```text
+Rust Source (.rs)
+    │  #[contract], #[method] macros expand at compile time
+    │  → selector computation, dispatch logic, ABI encode/decode
+    ▼
+cargo build --target riscv64emac-unknown-none-polkavm
+    │  -Zbuild-std=core,alloc
+    │  profile: lto=true, opt-level="z", codegen-units=1, panic=abort
+    ▼
+RISC-V ELF Binary
+    │
+    ▼
+polkavm-linker 0.31.0 (strip + optimize)
+    │
+    ▼
+target/<name>.<profile>.polkavm   — deployable bytecode
+target/<name>.<profile>.abi.json  — ABI metadata
+```
+
+The build is orchestrated by `cargo-pvm-contract-builder`, invoked from the generated `build.rs`.
+
+## Debug vs Release
+
+Both profiles produce `.polkavm` output:
+
+```bash
+cargo build           # → target/my_contract.debug.polkavm
+cargo build --release # → target/my_contract.release.polkavm
+```
+
+Release builds are significantly smaller due to size optimization. Always use `--release` for deployment.
