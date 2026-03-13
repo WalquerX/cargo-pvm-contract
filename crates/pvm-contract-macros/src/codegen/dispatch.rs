@@ -76,8 +76,13 @@ pub fn generate_dispatch_arm(
     let [s0, s1, s2, s3] = selector;
 
     let fn_name = &method.fn_name;
-    let decoding = generate_param_decoding(&method.param_names, &method.signature.inputs, use_alloc);
-    let ParamDecoding { size_check, decode_statements, call_args } = decoding;
+    let decoding =
+        generate_param_decoding(&method.param_names, &method.signature.inputs, use_alloc);
+    let ParamDecoding {
+        size_check,
+        decode_statements,
+        call_args,
+    } = decoding;
     let has_return = !method.signature.outputs.is_empty();
     let encode_and_return = generate_encode_and_return(&method.signature.outputs, use_alloc);
 

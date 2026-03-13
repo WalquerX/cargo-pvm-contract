@@ -492,7 +492,11 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 .collect();
 
             let decoding = generate_param_decoding(&param_names, &sol_types, use_alloc);
-            let super::dispatch::ParamDecoding { size_check, decode_statements, call_args } = decoding;
+            let super::dispatch::ParamDecoding {
+                size_check,
+                decode_statements,
+                call_args,
+            } = decoding;
 
             let read_calldata = if use_alloc {
                 quote! {
