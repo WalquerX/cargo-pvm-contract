@@ -28,6 +28,8 @@ inquire = { workspace = true }
 askama = { workspace = true }
 polkavm-linker = { workspace = true }
 convert_case = { workspace = true }
+tiny-keccak = { workspace = true }
+hex = "0.4"
 
 [dev-dependencies]
 assert_cmd = "2.0"

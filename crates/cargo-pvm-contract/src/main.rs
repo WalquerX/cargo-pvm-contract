@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use include_dir::{Dir, include_dir};
 use inquire::{Select, Text};
 use log::debug;
 use std::path::PathBuf;
 
+mod encode_decode;
 mod scaffold;
 
 // Embed the templates directory into the binary
@@ -14,17 +15,21 @@ static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 #[command(name = "cargo", bin_name = "cargo", author, version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: CargoSubcommand,
 }
 
 #[derive(Subcommand, Debug)]
-enum Commands {
-    /// Initialize contract projects for PolkaVM
+enum CargoSubcommand {
+    /// Tools for building and interacting with PVM smart contracts
     PvmContract(PvmContractArgs),
 }
 
-#[derive(Parser, Debug, Default)]
+#[derive(Args, Debug)]
 struct PvmContractArgs {
+    #[command(subcommand)]
+    command: Option<PvmContractCommand>,
+
+    // Legacy flat init flags (for backwards compatibility when no subcommand given)
     #[arg(long, value_enum)]
     init_type: Option<InitType>,
     #[arg(long)]
@@ -37,6 +42,58 @@ struct PvmContractArgs {
     name: Option<String>,
     #[arg(long)]
     sol_file: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+enum PvmContractCommand {
+    /// Initialize a new contract project (default when no subcommand is given)
+    Init(InitArgs),
+    /// Encode a function call or constructor into ABI-encoded hex calldata
+    Encode(EncodeArgs),
+    /// Decode ABI-encoded hex calldata back to human-readable format
+    Decode(DecodeArgs),
+}
+
+#[derive(Args, Debug, Default)]
+struct InitArgs {
+    #[arg(long, value_enum)]
+    init_type: Option<InitType>,
+    #[arg(long)]
+    example: Option<String>,
+    #[arg(long, value_enum)]
+    api_style: Option<ApiStyle>,
+    #[arg(long, value_enum)]
+    allocator: Option<Allocator>,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    sol_file: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+struct EncodeArgs {
+    /// Path to the ABI JSON file
+    #[arg(long)]
+    abi: PathBuf,
+    /// Function name to encode (omit for constructor)
+    #[arg(long)]
+    function: Option<String>,
+    /// Arguments to encode (space-separated)
+    #[arg(trailing_var_arg = true)]
+    args: Vec<String>,
+}
+
+#[derive(Args, Debug)]
+struct DecodeArgs {
+    /// Path to the ABI JSON file
+    #[arg(long)]
+    abi: PathBuf,
+    /// Hex-encoded calldata to decode (0x-prefixed)
+    #[arg(long)]
+    data: String,
+    /// Decode as constructor (no 4-byte selector)
+    #[arg(long, default_value_t = false)]
+    constructor: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
@@ -180,11 +237,59 @@ fn main() -> Result<()> {
 
     let Cli { command } = Cli::parse();
     match command {
-        Commands::PvmContract(args) => init_command(args),
+        CargoSubcommand::PvmContract(args) => handle_pvm_contract(args),
     }
 }
 
-fn init_command(args: PvmContractArgs) -> Result<()> {
+fn handle_pvm_contract(args: PvmContractArgs) -> Result<()> {
+    match args.command {
+        Some(PvmContractCommand::Init(init_args)) => init_command(init_args),
+        Some(PvmContractCommand::Encode(encode_args)) => encode_command(encode_args),
+        Some(PvmContractCommand::Decode(decode_args)) => decode_command(decode_args),
+        None => {
+            // Legacy: treat flat args as init command
+            let init_args = InitArgs {
+                init_type: args.init_type,
+                example: args.example,
+                api_style: args.api_style,
+                allocator: args.allocator,
+                name: args.name,
+                sol_file: args.sol_file,
+            };
+            init_command(init_args)
+        }
+    }
+}
+
+fn encode_command(args: EncodeArgs) -> Result<()> {
+    let calldata = match &args.function {
+        Some(function_name) => {
+            encode_decode::encode_call(&args.abi, function_name, &args.args)?
+        }
+        None => encode_decode::encode_constructor(&args.abi, &args.args)?,
+    };
+    println!("0x{}", hex::encode(&calldata));
+    Ok(())
+}
+
+fn decode_command(args: DecodeArgs) -> Result<()> {
+    if args.constructor {
+        let params = encode_decode::decode_constructor(&args.abi, &args.data)?;
+        println!("Constructor parameters:");
+        for (name, sol_type, value) in &params {
+            println!("  {name} ({sol_type}): {value}");
+        }
+    } else {
+        let (function_name, params) = encode_decode::decode_call(&args.abi, &args.data)?;
+        println!("Function: {function_name}");
+        for (name, sol_type, value) in &params {
+            println!("  {name} ({sol_type}): {value}");
+        }
+    }
+    Ok(())
+}
+
+fn init_command(args: InitArgs) -> Result<()> {
     let init_type = match args.init_type {
         Some(t) => t,
         None => {
