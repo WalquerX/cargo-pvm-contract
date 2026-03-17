@@ -385,6 +385,73 @@ fn generate_dynamic_field_decode(ty: &Type, sol_type: &SolType, head_offset: usi
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signature::SolType;
+
+    #[test]
+    fn custom_type_field_total_size_is_nonzero() {
+        // When a struct has a Custom type field (type alias or derived struct),
+        // head_size() returns 0, causing total_size to undercount.
+        // This leads to buffer underallocation and panics at runtime.
+        let field_info: Vec<(Option<syn::Ident>, SolType)> = vec![
+            (
+                Some(syn::parse_str::<syn::Ident>("x").unwrap()),
+                SolType::Uint(64),
+            ),
+            (
+                Some(syn::parse_str::<syn::Ident>("count").unwrap()),
+                SolType::Custom("Count".to_string()),
+            ),
+        ];
+        let total: usize = field_info.iter().map(|(_, t)| t.head_size()).sum();
+        assert_eq!(
+            total, 64,
+            "u64 (32) + Count alias (should be 32) = 64, got {}",
+            total
+        );
+    }
+
+    #[test]
+    fn build_sol_signature_resolves_custom_type_names() {
+        // A Custom("Count") field should produce "uint64" in the Solidity
+        // signature, not "Count". Otherwise selectors and ABI are wrong.
+        let field_info: Vec<(Option<syn::Ident>, SolType)> = vec![(
+            Some(syn::parse_str::<syn::Ident>("count").unwrap()),
+            SolType::Custom("Count".to_string()),
+        )];
+        let sig = build_sol_signature(&field_info);
+        assert_eq!(
+            sig, "(uint64)",
+            "sol signature should resolve alias to Solidity type, got '{}'",
+            sig
+        );
+    }
+
+    #[test]
+    fn build_sol_signature_resolves_nested_custom_types() {
+        // A Custom("Point") field (where Point is a SolType struct) should
+        // produce the nested tuple signature, not "Point".
+        let field_info: Vec<(Option<syn::Ident>, SolType)> = vec![
+            (
+                Some(syn::parse_str::<syn::Ident>("a").unwrap()),
+                SolType::Custom("Point".to_string()),
+            ),
+            (
+                Some(syn::parse_str::<syn::Ident>("b").unwrap()),
+                SolType::Custom("Point".to_string()),
+            ),
+        ];
+        let sig = build_sol_signature(&field_info);
+        assert_eq!(
+            sig, "((uint64,uint64),(uint64,uint64))",
+            "nested struct fields should expand to tuple signatures, got '{}'",
+            sig
+        );
+    }
+}
+
 fn generate_field_encode(
     sol_type: &SolType,
     value_expr: &TokenStream,

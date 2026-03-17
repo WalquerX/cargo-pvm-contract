@@ -276,6 +276,68 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_selector_for_custom_type_matches_concrete_type() {
+        // When a method uses a type alias (e.g., `type Count = u64`), the
+        // generated dispatch arm must use the same selector that external
+        // callers compute from the ABI (which says "uint64").
+        let with_alias = MethodInfo {
+            fn_name: syn::parse_str("set_count").unwrap(),
+            signature: FunctionSignature {
+                name: "setCount".to_string(),
+                inputs: vec![SolType::Custom("Count".to_string())],
+                outputs: vec![],
+            },
+            param_names: vec![syn::parse_str("count").unwrap()],
+            returns_result: false,
+        };
+        let with_concrete = MethodInfo {
+            fn_name: syn::parse_str("set_count").unwrap(),
+            signature: FunctionSignature {
+                name: "setCount".to_string(),
+                inputs: vec![SolType::Uint(64)],
+                outputs: vec![],
+            },
+            param_names: vec![syn::parse_str("count").unwrap()],
+            returns_result: false,
+        };
+        let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
+
+        let _arm_alias = generate_dispatch_arm(&with_alias, &mod_name, false).to_string();
+        let _arm_concrete = generate_dispatch_arm(&with_concrete, &mod_name, false).to_string();
+
+        // Extract the selector bytes [s0, s1, s2, s3] from both arms.
+        // They should be identical if type resolution is correct.
+        let expected_selector = compute_selector("setCount(uint64)");
+        let alias_selector =
+            compute_selector(&with_alias.signature.canonical_signature());
+
+        assert_eq!(
+            alias_selector, expected_selector,
+            "Dispatch selector mismatch: alias sig '{}' produces {:?}, \
+             but ABI sig 'setCount(uint64)' produces {:?}. Contract is unreachable.",
+            with_alias.signature.canonical_signature(),
+            alias_selector,
+            expected_selector,
+        );
+    }
+
+    #[test]
+    fn dispatch_min_input_size_accounts_for_custom_types() {
+        // Custom types report head_size=0, so the generated size check
+        // would accept empty calldata for methods that require 32+ bytes.
+        let inputs = vec![
+            SolType::Uint(64),
+            SolType::Custom("Count".to_string()),
+        ];
+        let min_size = calculate_min_input_size(&inputs);
+        assert_eq!(
+            min_size, 64,
+            "Two 32-byte params should require 64 bytes minimum, got {}",
+            min_size
+        );
+    }
+
+    #[test]
     fn generate_dispatch_arm_emits_compile_error_for_string_return_in_stack_mode() {
         let method = MethodInfo {
             fn_name: syn::parse_str("greeting").unwrap(),
