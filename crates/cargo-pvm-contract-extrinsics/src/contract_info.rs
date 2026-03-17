@@ -52,8 +52,7 @@ where
     HashFor<C>: IntoVisitor,
 {
     let best_block = get_best_block(rpc).await?;
-    let contract_info_address =
-        dynamic("Revive", "OriginalAccount", vec![Value::from_bytes(addr)]);
+    let contract_info_address = dynamic("Revive", "OriginalAccount", vec![Value::from_bytes(addr)]);
     let raw_value = client
         .storage()
         .at(best_block)
@@ -72,16 +71,13 @@ where
                 addr,
                 fallback
             );
-            let account_id =
-                <C as Config>::AccountId::decode(&mut &fallback[..]).unwrap();
+            let account_id = <C as Config>::AccountId::decode(&mut &fallback[..]).unwrap();
             Ok(account_id)
         }
         Some(raw_value) => {
             let raw_account_id = raw_value.as_type::<[u8; 32]>()?;
             let account: C::AccountId = Decode::decode(&mut &raw_account_id[..])
-                .map_err(|err| {
-                    anyhow!("AccountId from `[u8; 32]` deserialization error: {err}")
-                })?;
+                .map_err(|err| anyhow!("AccountId from `[u8; 32]` deserialization error: {err}"))?;
             Ok(account)
         }
     }
@@ -99,8 +95,7 @@ where
 {
     let best_block = get_best_block(rpc).await?;
 
-    let code_info_address =
-        dynamic("Revive", "CodeInfoOf", vec![Value::from_bytes(code_hash)]);
+    let code_info_address = dynamic("Revive", "CodeInfoOf", vec![Value::from_bytes(code_hash)]);
     let code_info_value = client
         .storage()
         .at(best_block)
@@ -281,8 +276,7 @@ pub async fn fetch_contract_binary<C: Config>(
 ) -> Result<Vec<u8>> {
     let best_block = get_best_block(rpc).await?;
 
-    let pristine_code_address =
-        dynamic("Revive", "PristineCode", vec![Value::from_bytes(hash)]);
+    let pristine_code_address = dynamic("Revive", "PristineCode", vec![Value::from_bytes(hash)]);
     let pristine_code = client
         .storage()
         .at(best_block)
@@ -302,8 +296,7 @@ fn parse_contract_address(
     let mut account = storage_contract_account_key
         .get(storage_contract_root_key_len..)
         .ok_or(anyhow!("Unexpected storage key size"))?;
-    Decode::decode(&mut account)
-        .map_err(|err| anyhow!("H160 deserialization error: {err}"))
+    Decode::decode(&mut account).map_err(|err| anyhow!("H160 deserialization error: {err}"))
 }
 
 /// Fetch all contract addresses from storage.

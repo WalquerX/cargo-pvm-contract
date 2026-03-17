@@ -10,11 +10,7 @@ use subxt::{
 
 /// A custom event emitted by the contract.
 #[derive(
-    scale::Decode,
-    scale::Encode,
-    scale_decode::DecodeAsType,
-    scale_encode::EncodeAsType,
-    Debug,
+    scale::Decode, scale::Encode, scale_decode::DecodeAsType, scale_encode::EncodeAsType, Debug,
 )]
 #[decode_as_type(crate_path = "subxt::ext::scale_decode")]
 #[encode_as_type(crate_path = "subxt::ext::scale_encode")]
@@ -34,11 +30,7 @@ impl StaticEvent for ContractEmitted {
 
 /// Contract deployed by deployer at the specified address.
 #[derive(
-    scale::Decode,
-    scale::Encode,
-    scale_decode::DecodeAsType,
-    scale_encode::EncodeAsType,
-    Debug,
+    scale::Decode, scale::Encode, scale_decode::DecodeAsType, scale_encode::EncodeAsType, Debug,
 )]
 #[decode_as_type(crate_path = "subxt::ext::scale_decode")]
 #[encode_as_type(crate_path = "subxt::ext::scale_encode")]
@@ -71,9 +63,7 @@ pub struct DisplayEvents(pub Vec<Event>);
 
 impl DisplayEvents {
     /// Parses events from extrinsic results into a displayable format.
-    pub fn from_events<C: Config>(
-        result: &ExtrinsicEvents<C>,
-    ) -> Result<DisplayEvents> {
+    pub fn from_events<C: Config>(result: &ExtrinsicEvents<C>) -> Result<DisplayEvents> {
         let mut events: Vec<Event> = vec![];
 
         for event in result.iter() {
@@ -85,25 +75,21 @@ impl DisplayEvents {
             };
 
             // For ContractEmitted events, show the raw hex data
-            if <ContractEmitted as StaticEvent>::is_event(
-                event.pallet_name(),
-                event.variant_name(),
-            ) {
-                if let Some(ce) = event.as_event::<ContractEmitted>().ok().flatten() {
+            if <ContractEmitted as StaticEvent>::is_event(event.pallet_name(), event.variant_name())
+                && let Some(ce) = event.as_event::<ContractEmitted>().ok().flatten()
+            {
+                event_entry.fields.push((
+                    "contract".to_string(),
+                    format!("0x{}", hex::encode(ce.contract.as_bytes())),
+                ));
+                event_entry
+                    .fields
+                    .push(("data".to_string(), format!("0x{}", hex::encode(&ce.data))));
+                for (i, topic) in ce.topics.iter().enumerate() {
                     event_entry.fields.push((
-                        "contract".to_string(),
-                        format!("0x{}", hex::encode(ce.contract.as_bytes())),
+                        format!("topic[{i}]"),
+                        format!("0x{}", hex::encode(topic.as_bytes())),
                     ));
-                    event_entry.fields.push((
-                        "data".to_string(),
-                        format!("0x{}", hex::encode(&ce.data)),
-                    ));
-                    for (i, topic) in ce.topics.iter().enumerate() {
-                        event_entry.fields.push((
-                            format!("topic[{i}]"),
-                            format!("0x{}", hex::encode(topic.as_bytes())),
-                        ));
-                    }
                 }
             }
 

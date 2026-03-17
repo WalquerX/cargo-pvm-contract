@@ -1,11 +1,5 @@
-use super::{
-    AccountIdMapper, ErrorVariant,
-    dry_run_extrinsic, submit_extrinsic,
-};
-use crate::{
-    extrinsic_calls::MapAccount,
-    extrinsic_opts::ExtrinsicOpts,
-};
+use super::{AccountIdMapper, ErrorVariant, dry_run_extrinsic, submit_extrinsic};
+use crate::{extrinsic_calls::MapAccount, extrinsic_opts::ExtrinsicOpts};
 use anyhow::Result;
 use scale::Encode;
 use subxt::{
@@ -30,9 +24,7 @@ impl<C: Config, Signer> MapAccountCommandBuilder<C, Signer>
 where
     Signer: tx::Signer<C> + Clone,
 {
-    pub fn new(
-        extrinsic_opts: ExtrinsicOpts<C, Signer>,
-    ) -> MapAccountCommandBuilder<C, Signer> {
+    pub fn new(extrinsic_opts: ExtrinsicOpts<C, Signer>) -> MapAccountCommandBuilder<C, Signer> {
         MapAccountCommandBuilder { extrinsic_opts }
     }
 
@@ -89,8 +81,7 @@ where
     /// Submit the map_account extrinsic.
     pub async fn map_account(&self) -> Result<MapAccountExecResult<C>, ErrorVariant> {
         let call = MapAccount::new().build();
-        let events =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
         let account_id = self.opts.signer().account_id();
         Ok(MapAccountExecResult {
             events,

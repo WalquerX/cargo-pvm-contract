@@ -3,6 +3,13 @@ use serde_json::Value;
 use std::path::Path;
 use tiny_keccak::{Hasher, Keccak};
 
+/// A decoded ABI parameter.
+pub struct DecodedParam {
+    pub name: String,
+    pub sol_type: String,
+    pub value: String,
+}
+
 /// Load an ABI JSON file and return the parsed ABI array.
 fn load_abi(abi_path: &Path) -> Result<Vec<Value>> {
     let content = std::fs::read_to_string(abi_path)
@@ -65,8 +72,7 @@ fn encode_uint256(value: &str) -> Result<Vec<u8>> {
     // Handle hex values
     if value.starts_with("0x") || value.starts_with("0X") {
         let hex_str = &value[2..];
-        let bytes = hex::decode(hex_str)
-            .with_context(|| format!("Invalid hex value: {value}"))?;
+        let bytes = hex::decode(hex_str).with_context(|| format!("Invalid hex value: {value}"))?;
         let mut padded = vec![0u8; 32];
         if bytes.len() > 32 {
             anyhow::bail!("Hex value too large for uint256: {value}");
@@ -101,8 +107,7 @@ fn encode_bool(value: &str) -> Result<Vec<u8>> {
 /// Encode an address (H160) into 32 bytes (left-padded).
 fn encode_address(value: &str) -> Result<Vec<u8>> {
     let hex_str = value.strip_prefix("0x").unwrap_or(value);
-    let bytes = hex::decode(hex_str)
-        .with_context(|| format!("Invalid address hex: {value}"))?;
+    let bytes = hex::decode(hex_str).with_context(|| format!("Invalid address hex: {value}"))?;
     if bytes.len() != 20 {
         anyhow::bail!("Address must be 20 bytes, got {}", bytes.len());
     }
@@ -114,8 +119,7 @@ fn encode_address(value: &str) -> Result<Vec<u8>> {
 /// Encode bytes (as hex string) into ABI dynamic encoding.
 fn encode_bytes(value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     let hex_str = value.strip_prefix("0x").unwrap_or(value);
-    let bytes = hex::decode(hex_str)
-        .with_context(|| format!("Invalid bytes hex: {value}"))?;
+    let bytes = hex::decode(hex_str).with_context(|| format!("Invalid bytes hex: {value}"))?;
     let len = bytes.len();
     let head = vec![0u8; 32]; // offset placeholder
     let mut tail = vec![0u8; 32]; // length
@@ -240,13 +244,10 @@ fn encode_params(inputs: &[Value], args: &[String]) -> Result<Vec<u8>> {
 
 /// Decode calldata using an ABI JSON file.
 /// Returns (function_name, Vec<(param_name, param_type, decoded_value)>).
-pub fn decode_call(
-    abi_path: &Path,
-    calldata_hex: &str,
-) -> Result<(String, Vec<(String, String, String)>)> {
+pub fn decode_call(abi_path: &Path, calldata_hex: &str) -> Result<(String, Vec<DecodedParam>)> {
     let hex_str = calldata_hex.strip_prefix("0x").unwrap_or(calldata_hex);
-    let calldata = hex::decode(hex_str)
-        .with_context(|| format!("Invalid hex calldata: {calldata_hex}"))?;
+    let calldata =
+        hex::decode(hex_str).with_context(|| format!("Invalid hex calldata: {calldata_hex}"))?;
 
     if calldata.len() < 4 {
         anyhow::bail!("Calldata too short (less than 4 bytes for selector)");
@@ -287,13 +288,9 @@ pub fn decode_call(
 }
 
 /// Decode constructor calldata using an ABI JSON file.
-pub fn decode_constructor(
-    abi_path: &Path,
-    calldata_hex: &str,
-) -> Result<Vec<(String, String, String)>> {
+pub fn decode_constructor(abi_path: &Path, calldata_hex: &str) -> Result<Vec<DecodedParam>> {
     let hex_str = calldata_hex.strip_prefix("0x").unwrap_or(calldata_hex);
-    let data =
-        hex::decode(hex_str).with_context(|| "Invalid hex for constructor data")?;
+    let data = hex::decode(hex_str).with_context(|| "Invalid hex for constructor data")?;
 
     let abi = load_abi(abi_path)?;
     let constructor = find_constructor(&abi)?;
@@ -305,10 +302,7 @@ pub fn decode_constructor(
     decode_params(inputs, &data)
 }
 
-fn decode_params(
-    inputs: &[Value],
-    data: &[u8],
-) -> Result<Vec<(String, String, String)>> {
+fn decode_params(inputs: &[Value], data: &[u8]) -> Result<Vec<DecodedParam>> {
     let mut results = Vec::new();
 
     for (i, input) in inputs.iter().enumerate() {
@@ -328,7 +322,11 @@ fn decode_params(
 
         let word = &data[offset..offset + 32];
         let value = decode_word(&sol_type, word, data)?;
-        results.push((name, sol_type, value));
+        results.push(DecodedParam {
+            name,
+            sol_type,
+            value,
+        });
     }
 
     Ok(results)
@@ -360,5 +358,346 @@ fn decode_word(sol_type: &str, word: &[u8], _full_data: &[u8]) -> Result<String>
         offset_bytes.copy_from_slice(&word[24..]);
         let offset = u64::from_be_bytes(offset_bytes) as usize;
         Ok(format!("(dynamic@offset:{offset})"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_abi_file(abi_json: &str) -> tempfile::NamedTempFile {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(abi_json.as_bytes()).unwrap();
+        f
+    }
+
+    // -- selector tests --
+
+    #[test]
+    fn selector_transfer() {
+        // keccak256("transfer(address,uint256)") = 0xa9059cbb...
+        let sel = selector_from_signature("transfer(address,uint256)");
+        assert_eq!(sel, [0xa9, 0x05, 0x9c, 0xbb]);
+    }
+
+    // -- build_function_signature tests --
+
+    #[test]
+    fn build_sig_from_abi_entry() {
+        let entry: Value = serde_json::from_str(
+            r#"{"name":"transfer","inputs":[{"type":"address"},{"type":"uint256"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            build_function_signature(&entry).unwrap(),
+            "transfer(address,uint256)"
+        );
+    }
+
+    #[test]
+    fn build_sig_no_params() {
+        let entry: Value = serde_json::from_str(r#"{"name":"totalSupply","inputs":[]}"#).unwrap();
+        assert_eq!(build_function_signature(&entry).unwrap(), "totalSupply()");
+    }
+
+    // -- encode primitive tests --
+
+    #[test]
+    fn encode_uint256_decimal() {
+        let encoded = encode_uint256("42").unwrap();
+        assert_eq!(encoded.len(), 32);
+        assert_eq!(encoded[31], 42);
+        assert!(encoded[..31].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_uint256_hex() {
+        let encoded = encode_uint256("0xff").unwrap();
+        assert_eq!(encoded.len(), 32);
+        assert_eq!(encoded[31], 0xff);
+        assert!(encoded[..31].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_uint256_large() {
+        let encoded = encode_uint256("1000000000000000000").unwrap(); // 1e18
+        assert_eq!(encoded.len(), 32);
+        let mut expected = [0u8; 16];
+        expected.copy_from_slice(&1_000_000_000_000_000_000u128.to_be_bytes());
+        assert_eq!(&encoded[16..], &expected);
+    }
+
+    #[test]
+    fn encode_bool_true() {
+        let encoded = encode_bool("true").unwrap();
+        assert_eq!(encoded[31], 1);
+        assert!(encoded[..31].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_bool_false() {
+        let encoded = encode_bool("false").unwrap();
+        assert!(encoded.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_bool_invalid() {
+        assert!(encode_bool("maybe").is_err());
+    }
+
+    #[test]
+    fn encode_address_with_prefix() {
+        let addr = "0x0000000000000000000000000000000000000001";
+        let encoded = encode_address(addr).unwrap();
+        assert_eq!(encoded.len(), 32);
+        assert_eq!(encoded[31], 1);
+        assert!(encoded[..31].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_address_without_prefix() {
+        let addr = "0000000000000000000000000000000000000001";
+        let encoded = encode_address(addr).unwrap();
+        assert_eq!(encoded[31], 1);
+    }
+
+    #[test]
+    fn encode_address_wrong_length() {
+        assert!(encode_address("0x0011").is_err());
+    }
+
+    // -- encode_bytes tests --
+
+    #[test]
+    fn encode_bytes_pads_to_32() {
+        let (_head, tail) = encode_bytes("0xdeadbeef").unwrap();
+        // tail = 32-byte length + data padded to 32 bytes
+        assert_eq!(tail.len(), 64); // 32 (length) + 32 (4 bytes padded)
+        // length word: 4
+        assert_eq!(tail[31], 4);
+        // data starts at offset 32
+        assert_eq!(&tail[32..36], &[0xde, 0xad, 0xbe, 0xef]);
+        // rest is zero-padded
+        assert!(tail[36..].iter().all(|&b| b == 0));
+    }
+
+    // -- encode_param tests --
+
+    #[test]
+    fn encode_param_bytesn() {
+        let result = encode_param("bytes4", "0xdeadbeef").unwrap();
+        match result {
+            EncodedParam::Static(data) => {
+                assert_eq!(&data[..4], &[0xde, 0xad, 0xbe, 0xef]);
+                assert!(data[4..].iter().all(|&b| b == 0));
+            }
+            EncodedParam::Dynamic { .. } => panic!("Expected static encoding for bytes4"),
+        }
+    }
+
+    #[test]
+    fn encode_param_unsupported() {
+        assert!(encode_param("tuple", "anything").is_err());
+    }
+
+    // -- full encode/decode roundtrip via ABI files --
+
+    const ERC20_ABI: &str = r#"[
+        {
+            "type": "function",
+            "name": "transfer",
+            "inputs": [
+                {"name": "to", "type": "address"},
+                {"name": "amount", "type": "uint256"}
+            ],
+            "outputs": [{"name": "", "type": "bool"}]
+        },
+        {
+            "type": "function",
+            "name": "balanceOf",
+            "inputs": [
+                {"name": "account", "type": "address"}
+            ],
+            "outputs": [{"name": "", "type": "uint256"}]
+        },
+        {
+            "type": "constructor",
+            "inputs": [
+                {"name": "initialSupply", "type": "uint256"}
+            ]
+        }
+    ]"#;
+
+    #[test]
+    fn encode_call_transfer() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec![
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "100".to_string(),
+        ];
+        let calldata = encode_call(f.path(), "transfer", &args).unwrap();
+        // First 4 bytes: selector for transfer(address,uint256)
+        assert_eq!(&calldata[..4], &[0xa9, 0x05, 0x9c, 0xbb]);
+        // Next 32 bytes: address padded
+        assert_eq!(calldata[4 + 31], 1);
+        // Next 32 bytes: uint256(100)
+        assert_eq!(calldata[4 + 32 + 31], 100);
+        assert_eq!(calldata.len(), 4 + 64);
+    }
+
+    #[test]
+    fn encode_call_wrong_arg_count() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec!["0x0000000000000000000000000000000000000001".to_string()];
+        assert!(encode_call(f.path(), "transfer", &args).is_err());
+    }
+
+    #[test]
+    fn encode_call_unknown_function() {
+        let f = write_abi_file(ERC20_ABI);
+        assert!(encode_call(f.path(), "nonexistent", &[]).is_err());
+    }
+
+    #[test]
+    fn encode_constructor_uint() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec!["1000000".to_string()];
+        let calldata = encode_constructor(f.path(), &args).unwrap();
+        // No selector for constructors
+        assert_eq!(calldata.len(), 32);
+        // Decode back the value
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&calldata[16..]);
+        assert_eq!(u128::from_be_bytes(bytes), 1_000_000);
+    }
+
+    #[test]
+    fn decode_call_transfer() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec![
+            "0x0000000000000000000000000000000000000001".to_string(),
+            "100".to_string(),
+        ];
+        let calldata = encode_call(f.path(), "transfer", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "transfer");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "to");
+        assert_eq!(params[0].sol_type, "address");
+        assert_eq!(
+            params[0].value,
+            "0x0000000000000000000000000000000000000001"
+        );
+        assert_eq!(params[1].name, "amount");
+        assert_eq!(params[1].sol_type, "uint256");
+        assert_eq!(params[1].value, "100");
+    }
+
+    #[test]
+    fn decode_call_balanceof() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec!["0x000000000000000000000000000000000000abcd".to_string()];
+        let calldata = encode_call(f.path(), "balanceOf", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "balanceOf");
+        assert_eq!(params.len(), 1);
+        assert_eq!(
+            params[0].value,
+            "0x000000000000000000000000000000000000abcd"
+        );
+    }
+
+    #[test]
+    fn decode_constructor_roundtrip() {
+        let f = write_abi_file(ERC20_ABI);
+        let args = vec!["999".to_string()];
+        let calldata = encode_constructor(f.path(), &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let params = decode_constructor(f.path(), &hex_data).unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "initialSupply");
+        assert_eq!(params[0].sol_type, "uint256");
+        assert_eq!(params[0].value, "999");
+    }
+
+    #[test]
+    fn decode_call_too_short() {
+        let f = write_abi_file(ERC20_ABI);
+        assert!(decode_call(f.path(), "0xaa").is_err());
+    }
+
+    #[test]
+    fn decode_call_unknown_selector() {
+        let f = write_abi_file(ERC20_ABI);
+        // Valid length but bogus selector + 32 bytes of data
+        let data = format!("0x{}{}", "deadbeef", "00".repeat(32));
+        assert!(decode_call(f.path(), &data).is_err());
+    }
+
+    // -- decode_word tests --
+
+    #[test]
+    fn decode_word_bool() {
+        let mut word = [0u8; 32];
+        word[31] = 1;
+        assert_eq!(decode_word("bool", &word, &[]).unwrap(), "true");
+        word[31] = 0;
+        assert_eq!(decode_word("bool", &word, &[]).unwrap(), "false");
+    }
+
+    #[test]
+    fn decode_word_int256_negative() {
+        // -1 in two's complement: all 0xff
+        let word = [0xffu8; 32];
+        assert_eq!(decode_word("int256", &word, &[]).unwrap(), "-1");
+    }
+
+    #[test]
+    fn decode_word_bytes4() {
+        let mut word = [0u8; 32];
+        word[0] = 0xde;
+        word[1] = 0xad;
+        word[2] = 0xbe;
+        word[3] = 0xef;
+        assert_eq!(decode_word("bytes4", &word, &[]).unwrap(), "0xdeadbeef");
+    }
+
+    // -- multi-type ABI roundtrip --
+
+    #[test]
+    fn encode_decode_mixed_types() {
+        let abi = r#"[{
+            "type": "function",
+            "name": "doStuff",
+            "inputs": [
+                {"name": "flag", "type": "bool"},
+                {"name": "addr", "type": "address"},
+                {"name": "count", "type": "uint128"}
+            ],
+            "outputs": []
+        }]"#;
+        let f = write_abi_file(abi);
+        let args = vec![
+            "true".to_string(),
+            "0x000000000000000000000000000000000000CAFE".to_string(),
+            "12345".to_string(),
+        ];
+        let calldata = encode_call(f.path(), "doStuff", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "doStuff");
+        assert_eq!(params[0].value, "true");
+        assert_eq!(
+            params[1].value,
+            "0x000000000000000000000000000000000000cafe"
+        );
+        assert_eq!(params[2].value, "12345");
     }
 }

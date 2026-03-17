@@ -16,16 +16,16 @@ use anyhow::Result;
 pub use balance::{BalanceVariant, TokenMetadata};
 pub use call::{CallCommandBuilder, CallExec};
 pub use contract_info::{
-    fetch_all_contracts, fetch_code_info, fetch_contract_binary, fetch_contract_info,
-    get_account_data, resolve_h160, AccountData, CodeInfo, ContractInfo, TrieId,
+    AccountData, CodeInfo, ContractInfo, TrieId, fetch_all_contracts, fetch_code_info,
+    fetch_contract_binary, fetch_contract_info, get_account_data, resolve_h160,
 };
 pub use error::{ErrorVariant, GenericError};
 pub use events::DisplayEvents;
 pub use extrinsic_calls::{Call, Instantiate, InstantiateWithCode, UploadCode};
 pub use extrinsic_opts::{ExtrinsicOpts, ExtrinsicOptsBuilder};
 pub use instantiate::{
-    Code, InstantiateArgs, InstantiateCommandBuilder, InstantiateDryRunResult,
-    InstantiateExec, InstantiateExecResult,
+    Code, InstantiateArgs, InstantiateCommandBuilder, InstantiateDryRunResult, InstantiateExec,
+    InstantiateExecResult,
 };
 pub use map_account::{MapAccountCommandBuilder, MapAccountExec, MapAccountExecResult};
 pub use remove::{RemoveCommandBuilder, RemoveExec};
@@ -33,14 +33,12 @@ pub use rpc::{RawParams, RpcRequest};
 pub use upload::{UploadCommandBuilder, UploadExec, UploadResult};
 
 use scale::{Decode, Encode};
-use sp_core::{keccak_256, H160};
+use sp_core::{H160, keccak_256};
 use subxt::{
     Config, OnlineClient,
     backend::legacy::LegacyRpcMethods,
     blocks,
-    config::{
-        DefaultExtrinsicParams, DefaultExtrinsicParamsBuilder, ExtrinsicParams, HashFor,
-    },
+    config::{DefaultExtrinsicParams, DefaultExtrinsicParamsBuilder, ExtrinsicParams, HashFor},
     ext::subxt_rpcs::methods::legacy::DryRunResultBytes,
     tx,
 };
@@ -95,20 +93,13 @@ where
 
     while let Some(status) = tx.next().await {
         match status? {
-            TxStatus::InBestBlock(tx_in_block)
-            | TxStatus::InFinalizedBlock(tx_in_block) => {
+            TxStatus::InBestBlock(tx_in_block) | TxStatus::InFinalizedBlock(tx_in_block) => {
                 let events = tx_in_block.wait_for_success().await?;
                 return Ok(events);
             }
-            TxStatus::Error { message } => {
-                return Err(TransactionError::Error(message).into())
-            }
-            TxStatus::Invalid { message } => {
-                return Err(TransactionError::Invalid(message).into())
-            }
-            TxStatus::Dropped { message } => {
-                return Err(TransactionError::Dropped(message).into())
-            }
+            TxStatus::Error { message } => return Err(TransactionError::Error(message).into()),
+            TxStatus::Invalid { message } => return Err(TransactionError::Invalid(message).into()),
+            TxStatus::Dropped { message } => return Err(TransactionError::Dropped(message).into()),
             _ => continue,
         }
     }

@@ -170,9 +170,7 @@ where
     Signer: tx::Signer<C> + Clone,
 {
     /// Simulates a contract instantiation via `ReviveApi_instantiate` RPC state call.
-    pub async fn instantiate_dry_run(
-        &self,
-    ) -> Result<ContractInstantiateResult<u128>> {
+    pub async fn instantiate_dry_run(&self) -> Result<ContractInstantiateResult<u128>> {
         let call_request = InstantiateRequest::<C> {
             origin: self.opts.signer().account_id(),
             value: self.args.value,
@@ -201,8 +199,7 @@ where
         )
         .build();
 
-        let events =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
 
         let instantiated = events
             .find_last::<ContractInstantiated>()?
@@ -231,8 +228,7 @@ where
         )
         .build();
 
-        let events =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
 
         let instantiated = events
             .find_first::<ContractInstantiated>()?
@@ -251,18 +247,16 @@ where
         gas_limit: Option<Weight>,
         storage_deposit_limit: Option<u128>,
     ) -> Result<InstantiateExecResult<C>, ErrorVariant> {
-        let (use_gas_limit, use_storage_deposit_limit) =
-            match (gas_limit, storage_deposit_limit) {
-                (Some(gas), Some(deposit)) => (gas, deposit),
-                (gas, deposit) => {
-                    let (estimated_gas, estimated_deposit) =
-                        self.estimate_limits().await?;
-                    (
-                        gas.unwrap_or(estimated_gas),
-                        deposit.unwrap_or(estimated_deposit),
-                    )
-                }
-            };
+        let (use_gas_limit, use_storage_deposit_limit) = match (gas_limit, storage_deposit_limit) {
+            (Some(gas), Some(deposit)) => (gas, deposit),
+            (gas, deposit) => {
+                let (estimated_gas, estimated_deposit) = self.estimate_limits().await?;
+                (
+                    gas.unwrap_or(estimated_gas),
+                    deposit.unwrap_or(estimated_deposit),
+                )
+            }
+        };
 
         match self.args.code.clone() {
             Code::Upload(code) => {
@@ -270,12 +264,8 @@ where
                     .await
             }
             Code::Existing(code_hash) => {
-                self.instantiate_with_code_hash(
-                    code_hash,
-                    use_gas_limit,
-                    use_storage_deposit_limit,
-                )
-                .await
+                self.instantiate_with_code_hash(code_hash, use_gas_limit, use_storage_deposit_limit)
+                    .await
             }
         }
     }
@@ -293,18 +283,16 @@ where
                     .args
                     .proof_size
                     .unwrap_or_else(|| instantiate_result.gas_required.proof_size());
-                let deposit_limit =
-                    self.args.storage_deposit_limit.unwrap_or_else(|| {
-                        match instantiate_result.storage_deposit {
-                            StorageDeposit::Refund(_) => 0,
-                            StorageDeposit::Charge(value) => value,
-                        }
-                    });
+                let deposit_limit = self.args.storage_deposit_limit.unwrap_or(
+                    match instantiate_result.storage_deposit {
+                        StorageDeposit::Refund(_) => 0,
+                        StorageDeposit::Charge(value) => value,
+                    },
+                );
                 Ok((Weight::from_parts(ref_time, proof_size), deposit_limit))
             }
             Err(ref err) => {
-                let object =
-                    ErrorVariant::from_dispatch_error(err, &self.client.metadata())?;
+                let object = ErrorVariant::from_dispatch_error(err, &self.client.metadata())?;
                 tracing::info!("Pre-submission dry-run failed. Error: {}", object);
                 Err(anyhow!("Pre-submission dry-run failed. Error: {object}"))
             }

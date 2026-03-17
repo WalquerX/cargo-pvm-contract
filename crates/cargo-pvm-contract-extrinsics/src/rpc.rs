@@ -19,13 +19,7 @@ impl RawParams {
             .iter()
             .map(|e| {
                 // Try parsing as JSON first, fall back to string
-                serde_json::from_str(e).unwrap_or_else(|_| {
-                    if e.starts_with("0x") {
-                        serde_json::Value::String(e.clone())
-                    } else {
-                        serde_json::Value::String(e.clone())
-                    }
-                })
+                serde_json::from_str(e).unwrap_or_else(|_| serde_json::Value::String(e.clone()))
             })
             .collect();
 

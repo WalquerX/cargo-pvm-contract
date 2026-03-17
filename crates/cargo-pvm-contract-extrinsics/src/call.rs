@@ -3,10 +3,7 @@ use super::{
     pallet_revive_primitives::{ContractExecResult, StorageDeposit},
     state_call, submit_extrinsic,
 };
-use crate::{
-    extrinsic_calls::Call,
-    extrinsic_opts::ExtrinsicOpts,
-};
+use crate::{extrinsic_calls::Call, extrinsic_opts::ExtrinsicOpts};
 
 use anyhow::{Result, anyhow};
 use scale::Encode;
@@ -143,8 +140,7 @@ where
         )
         .build();
 
-        let result =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let result = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
 
         Ok(result)
     }
@@ -169,23 +165,20 @@ where
                         let proof_size = self
                             .proof_size
                             .unwrap_or_else(|| call_result.gas_required.proof_size());
-                        let storage_deposit_limit =
-                            self.opts.storage_deposit_limit().unwrap_or_else(|| {
-                                match call_result.storage_deposit {
-                                    StorageDeposit::Refund(_) => 0,
-                                    StorageDeposit::Charge(charge) => charge,
-                                }
-                            });
+                        let storage_deposit_limit = self.opts.storage_deposit_limit().unwrap_or(
+                            match call_result.storage_deposit {
+                                StorageDeposit::Refund(_) => 0,
+                                StorageDeposit::Charge(charge) => charge,
+                            },
+                        );
                         Ok((
                             Weight::from_parts(ref_time, proof_size),
                             storage_deposit_limit,
                         ))
                     }
                     Err(ref err) => {
-                        let object = ErrorVariant::from_dispatch_error(
-                            err,
-                            &self.client.metadata(),
-                        )?;
+                        let object =
+                            ErrorVariant::from_dispatch_error(err, &self.client.metadata())?;
                         Err(anyhow!("Pre-submission dry-run failed. Error: {object}"))
                     }
                 }

@@ -263,9 +263,7 @@ fn handle_pvm_contract(args: PvmContractArgs) -> Result<()> {
 
 fn encode_command(args: EncodeArgs) -> Result<()> {
     let calldata = match &args.function {
-        Some(function_name) => {
-            encode_decode::encode_call(&args.abi, function_name, &args.args)?
-        }
+        Some(function_name) => encode_decode::encode_call(&args.abi, function_name, &args.args)?,
         None => encode_decode::encode_constructor(&args.abi, &args.args)?,
     };
     println!("0x{}", hex::encode(&calldata));
@@ -276,14 +274,14 @@ fn decode_command(args: DecodeArgs) -> Result<()> {
     if args.constructor {
         let params = encode_decode::decode_constructor(&args.abi, &args.data)?;
         println!("Constructor parameters:");
-        for (name, sol_type, value) in &params {
-            println!("  {name} ({sol_type}): {value}");
+        for p in &params {
+            println!("  {} ({}): {}", p.name, p.sol_type, p.value);
         }
     } else {
         let (function_name, params) = encode_decode::decode_call(&args.abi, &args.data)?;
         println!("Function: {function_name}");
-        for (name, sol_type, value) in &params {
-            println!("  {name} ({sol_type}): {value}");
+        for p in &params {
+            println!("  {} ({}): {}", p.name, p.sol_type, p.value);
         }
     }
     Ok(())

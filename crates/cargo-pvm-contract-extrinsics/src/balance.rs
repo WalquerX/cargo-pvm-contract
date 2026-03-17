@@ -59,8 +59,7 @@ impl TokenMetadata {
             .get("tokenDecimals")
             .unwrap_or(&default_decimals)
             .as_u64()
-            .context("error converting decimal to u64")?
-            as usize;
+            .context("error converting decimal to u64")? as usize;
         let symbol = sys_props
             .get("tokenSymbol")
             .unwrap_or(&default_units)
@@ -93,8 +92,8 @@ impl FromStr for DenominatedBalance {
     type Err = anyhow::Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let symbols = value
-            .trim_start_matches(|ch: char| ch.is_numeric() || ch == '.' || ch == ',');
+        let symbols =
+            value.trim_start_matches(|ch: char| ch.is_numeric() || ch == '.' || ch == ',');
         let unit_char = symbols
             .chars()
             .next()
@@ -149,8 +148,7 @@ where
                         UnitPrefix::Nano => -9,
                     })
                 .try_into()?;
-                let multiple =
-                    Decimal::from_str_exact(&format!("1{}", "0".repeat(zeros)))?;
+                let multiple = Decimal::from_str_exact(&format!("1{}", "0".repeat(zeros)))?;
                 let fract_scale = den_balance.value.fract().scale();
                 let mantissa_difference = zeros as isize - fract_scale as isize;
                 if mantissa_difference < 0 {
@@ -169,10 +167,7 @@ where
     }
 
     /// Display token units in a denominated format.
-    pub fn from<T: Into<u128>>(
-        value: T,
-        token_metadata: Option<&TokenMetadata>,
-    ) -> Result<Self> {
+    pub fn from<T: Into<u128>>(value: T, token_metadata: Option<&TokenMetadata>) -> Result<Self> {
         let n: u128 = value.into();
 
         if let Some(token_metadata) = token_metadata {
@@ -199,42 +194,37 @@ where
             if (giga_units_zeros + 1..).contains(&number_of_digits) {
                 zeros = giga_units_zeros;
                 unit = UnitPrefix::Giga;
-            } else if (mega_units_zeros + 1..=giga_units_zeros)
-                .contains(&number_of_digits)
-            {
+            } else if (mega_units_zeros + 1..=giga_units_zeros).contains(&number_of_digits) {
                 zeros = mega_units_zeros;
                 unit = UnitPrefix::Mega;
-            } else if (kilo_units_zeros + 1..=mega_units_zeros)
-                .contains(&number_of_digits)
-            {
+            } else if (kilo_units_zeros + 1..=mega_units_zeros).contains(&number_of_digits) {
                 zeros = kilo_units_zeros;
                 unit = UnitPrefix::Kilo;
-            } else if (one_unit_zeros + 1..=kilo_units_zeros).contains(&number_of_digits)
-            {
+            } else if (one_unit_zeros + 1..=kilo_units_zeros).contains(&number_of_digits) {
                 zeros = one_unit_zeros;
                 unit = UnitPrefix::One;
-            } else if milli_units_zeros.is_some()
-                && (milli_units_zeros.unwrap() + 1..=one_unit_zeros)
-                    .contains(&number_of_digits)
-            {
-                zeros = milli_units_zeros.unwrap();
-                unit = UnitPrefix::Milli;
-            } else if milli_units_zeros.is_some()
-                && micro_units_zeros.is_some()
-                && (micro_units_zeros.unwrap() + 1..=milli_units_zeros.unwrap())
-                    .contains(&number_of_digits)
-            {
-                zeros = micro_units_zeros.unwrap();
-                unit = UnitPrefix::Micro;
-            } else if nano_units_zeros.is_some() {
-                zeros = nano_units_zeros.unwrap();
+            } else if let Some(milli_zeros) = milli_units_zeros {
+                if (milli_zeros + 1..=one_unit_zeros).contains(&number_of_digits) {
+                    zeros = milli_zeros;
+                    unit = UnitPrefix::Milli;
+                } else if let Some(micro_zeros) = micro_units_zeros {
+                    if (micro_zeros + 1..=milli_zeros).contains(&number_of_digits) {
+                        zeros = micro_zeros;
+                        unit = UnitPrefix::Micro;
+                    } else {
+                        return Err(anyhow!("Invalid denomination"));
+                    }
+                } else {
+                    return Err(anyhow!("Invalid denomination"));
+                }
+            } else if let Some(nano_zeros) = nano_units_zeros {
+                zeros = nano_zeros;
                 unit = UnitPrefix::Nano;
             } else {
                 return Err(anyhow!("Invalid denomination"));
             }
             let multiple = Decimal::from_str_exact(&format!("1{}", "0".repeat(zeros)))?;
-            let value = Decimal::from_u128(n)
-                .context("value can not be converted into decimal")?
+            let value = Decimal::from_u128(n).context("value can not be converted into decimal")?
                 / multiple;
 
             Ok(BalanceVariant::Denominated(DenominatedBalance {

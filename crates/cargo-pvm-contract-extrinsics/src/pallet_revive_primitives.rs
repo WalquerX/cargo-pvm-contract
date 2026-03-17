@@ -31,16 +31,13 @@ pub type ContractInstantiateResult<Balance> =
     ContractResult<Result<InstantiateReturnValue, DispatchError>, Balance>;
 
 /// Result type of a `bare_code_upload` call.
-pub type CodeUploadResult<Balance> =
-    Result<CodeUploadReturnValue<Balance>, DispatchError>;
+pub type CodeUploadResult<Balance> = Result<CodeUploadReturnValue<Balance>, DispatchError>;
 
 /// Result type of a `get_storage` call.
 pub type GetStorageResult = Result<Option<Vec<u8>>, ContractAccessError>;
 
 /// The possible errors that can happen querying the storage of a contract.
-#[derive(
-    Copy, Clone, Eq, PartialEq, Encode, Decode, MaxEncodedLen, RuntimeDebug, TypeInfo,
-)]
+#[derive(Copy, Clone, Eq, PartialEq, Encode, Decode, MaxEncodedLen, RuntimeDebug, TypeInfo)]
 pub enum ContractAccessError {
     /// The given address doesn't point to a contract.
     DoesntExist,

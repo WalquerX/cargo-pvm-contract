@@ -1,12 +1,8 @@
 use super::{
-    ContractBinary, ErrorVariant,
-    pallet_revive_primitives::CodeUploadResult,
-    state_call, submit_extrinsic,
+    ContractBinary, ErrorVariant, pallet_revive_primitives::CodeUploadResult, state_call,
+    submit_extrinsic,
 };
-use crate::{
-    extrinsic_calls::UploadCode,
-    extrinsic_opts::ExtrinsicOpts,
-};
+use crate::{extrinsic_calls::UploadCode, extrinsic_opts::ExtrinsicOpts};
 use anyhow::Result;
 use scale::Encode;
 use subxt::{
@@ -80,15 +76,11 @@ where
 
     /// Uploads contract code to the blockchain via an extrinsic.
     pub async fn upload_code(&self) -> Result<UploadResult<C>, ErrorVariant> {
-        let storage_deposit_limit = self
-            .opts
-            .storage_deposit_limit()
-            .unwrap_or(0);
+        let storage_deposit_limit = self.opts.storage_deposit_limit().unwrap_or(0);
 
         let call = UploadCode::new(self.code.clone(), storage_deposit_limit).build();
 
-        let events =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
         tracing::debug!("events: {:?}", events);
 
         Ok(UploadResult { events })

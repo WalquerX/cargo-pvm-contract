@@ -4345,7 +4345,14 @@ dependencies = [
 name = "pvm-contract-e2e-tests"
 version = "0.3.0"
 dependencies = [
+ "anyhow",
+ "cargo-pvm-contract-extrinsics",
  "serde_json",
+ "sp-core",
+ "subxt",
+ "subxt-signer",
+ "tokio",
+ "url",
 ]
 
 [[package]]

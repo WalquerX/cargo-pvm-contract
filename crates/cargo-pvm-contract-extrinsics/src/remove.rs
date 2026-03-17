@@ -1,8 +1,5 @@
 use super::{ErrorVariant, submit_extrinsic};
-use crate::{
-    extrinsic_calls::RemoveCode,
-    extrinsic_opts::ExtrinsicOpts,
-};
+use crate::{extrinsic_calls::RemoveCode, extrinsic_opts::ExtrinsicOpts};
 
 use anyhow::Result;
 use subxt::{
@@ -68,8 +65,7 @@ where
     pub async fn remove_code(&self) -> Result<ExtrinsicEvents<C>, ErrorVariant> {
         let code_hash = self.final_code_hash;
         let call = RemoveCode::new(code_hash).build();
-        let events =
-            submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
+        let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
         Ok(events)
     }
 
