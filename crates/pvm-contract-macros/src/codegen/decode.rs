@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
+use super::sol_type::sol_type_head_size_expr;
 use crate::signature::SolType;
 
 fn generate_sol_decode<T: quote::ToTokens>(
@@ -129,7 +130,6 @@ pub fn generate_decode(
             }
         }
         SolType::FixedArray(inner, size) => {
-            let _size_lit = *size;
             let elem_size = inner.head_size();
             let elem_decodes: Vec<_> = (0..*size)
                 .map(|i| {
@@ -198,7 +198,7 @@ fn generate_decode_params_with_runtime_offset(
         .iter()
         .map(|ty| {
             let decode = generate_decode_runtime_offset(ty, use_alloc);
-            let size_increment = generate_size_increment(ty);
+            let size_increment = sol_type_head_size_expr(ty);
             quote! {{
                 let __value = #decode;
                 __decode_offset += #size_increment;
@@ -251,21 +251,17 @@ fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream 
     }
 }
 
-fn generate_size_increment(ty: &SolType) -> TokenStream {
-    match ty {
-        SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            quote! { <#type_path as ::pvm_contract_types::SolDecode>::ENCODED_SIZE }
-        }
-        _ => {
-            let size = ty.head_size();
-            quote! { #size }
-        }
-    }
-}
+pub fn calculate_min_input_size(types: &[SolType]) -> TokenStream {
+    let has_custom = types.iter().any(|t| t.has_custom_types());
 
-pub fn calculate_min_input_size(types: &[SolType]) -> usize {
-    types.iter().map(|t| t.head_size()).sum()
+    if !has_custom {
+        let total: usize = types.iter().map(|t| t.head_size()).sum();
+        return quote! { #total };
+    }
+
+    let size_exprs: Vec<TokenStream> = types.iter().map(sol_type_head_size_expr).collect();
+
+    quote! { 0 #(+ #size_exprs)* }
 }
 
 pub fn has_custom_types(types: &[SolType]) -> bool {

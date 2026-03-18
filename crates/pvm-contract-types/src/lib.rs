@@ -9,6 +9,10 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 mod alloc_types;
 
+mod const_keccak;
+
+#[doc(hidden)]
+pub use const_format;
 use ruint::aliases::U256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,9 +46,22 @@ impl AsRef<[u8]> for Address {
     }
 }
 
+/// Computes the 4-byte Solidity function selector at compile time.
+pub const fn const_selector(sig: &str) -> [u8; 4] {
+    let hash = const_keccak::keccak256(sig.as_bytes());
+    [hash[0], hash[1], hash[2], hash[3]]
+}
+
 /// Trait for encoding Rust types to Solidity ABI-encoded bytes.
 pub trait SolEncode {
     const IS_DYNAMIC: bool;
+
+    /// The canonical Solidity type name (e.g. "uint256", "address", "(uint64,uint64)").
+    const SOL_NAME: &'static str;
+
+    /// Size of the head portion in ABI encoding. Defaults to 32 (one ABI word).
+    /// Overridden by structs to the sum of their field HEAD_SIZEs.
+    const HEAD_SIZE: usize = 32;
 
     fn encode_len(&self) -> usize;
     fn encode_to(&self, buf: &mut [u8]);
@@ -58,7 +75,9 @@ pub trait SolEncode {
     }
 
     #[cfg(feature = "abi-reflection")]
-    fn sol_name() -> alloc::string::String;
+    fn sol_name() -> alloc::string::String {
+        alloc::string::String::from(Self::SOL_NAME)
+    }
 }
 
 /// Marker trait for types with compile-time known encoded size.
@@ -86,6 +105,7 @@ macro_rules! impl_static_type {
     ($ty:ty, $sol_name:expr, $encode_fn:expr, $decode_fn:expr) => {
         impl SolEncode for $ty {
             const IS_DYNAMIC: bool = false;
+            const SOL_NAME: &'static str = $sol_name;
 
             #[inline]
             fn encode_len(&self) -> usize {
@@ -94,11 +114,6 @@ macro_rules! impl_static_type {
 
             fn encode_to(&self, buf: &mut [u8]) {
                 $encode_fn(self, buf)
-            }
-
-            #[cfg(feature = "abi-reflection")]
-            fn sol_name() -> alloc::string::String {
-                alloc::string::String::from($sol_name)
             }
         }
 
@@ -295,6 +310,7 @@ impl_static_type!(
 
 impl SolEncode for &str {
     const IS_DYNAMIC: bool = true;
+    const SOL_NAME: &'static str = "string";
 
     fn encode_len(&self) -> usize {
         let data_len = self.len();
@@ -333,11 +349,6 @@ impl SolEncode for &str {
 
         buf[32..32 + data_len].copy_from_slice(bytes);
         buf[32 + data_len..32 + data_len + padding].fill(0);
-    }
-
-    #[cfg(feature = "abi-reflection")]
-    fn sol_name() -> alloc::string::String {
-        alloc::string::String::from("string")
     }
 }
 

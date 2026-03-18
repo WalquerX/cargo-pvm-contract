@@ -3,6 +3,7 @@ use quote::quote;
 
 use super::decode::{calculate_min_input_size, generate_decode_params, has_custom_types};
 use super::encode::{generate_dynamic_value_encode, generate_encode};
+use super::sol_type::{sol_type_head_size_expr, sol_type_name_parts};
 use crate::signature::{FunctionSignature, SolType, compute_selector};
 
 pub struct MethodInfo {
@@ -12,24 +13,66 @@ pub struct MethodInfo {
     pub returns_result: bool,
 }
 
+fn build_const_signature_expr(method: &MethodInfo) -> TokenStream {
+    let fn_name = &method.signature.name;
+    let mut parts: Vec<TokenStream> = Vec::new();
+    let prefix = format!("{}(", fn_name);
+    parts.push(quote! { #prefix });
+
+    for (i, input_type) in method.signature.inputs.iter().enumerate() {
+        if i > 0 {
+            parts.push(quote! { "," });
+        }
+        sol_type_name_parts(input_type, &mut parts);
+    }
+
+    parts.push(quote! { ")" });
+    quote! { ::pvm_contract_types::const_format::concatcp!(#(#parts),*) }
+}
+
+fn build_output_size_expr(outputs: &[SolType]) -> TokenStream {
+    let has_custom = outputs.iter().any(|t| t.has_custom_types());
+
+    if !has_custom {
+        let total: usize = outputs.iter().map(|t| t.head_size()).sum();
+        return quote! { #total };
+    }
+
+    let size_exprs: Vec<TokenStream> = outputs.iter().map(sol_type_head_size_expr).collect();
+
+    quote! { 0 #(+ #size_exprs)* }
+}
+
 pub fn generate_dispatch_arm(
     method: &MethodInfo,
     mod_name: &syn::Ident,
     use_alloc: bool,
-) -> TokenStream {
-    let selector = compute_selector(&method.signature.canonical_signature());
-    let [s0, s1, s2, s3] = selector;
+) -> (TokenStream, TokenStream) {
+    let sel_ident = quote::format_ident!("__SEL_{}", method.fn_name);
+    let has_custom_inputs = method.signature.inputs.iter().any(|t| t.has_custom_types());
+
+    let const_def = if has_custom_inputs {
+        let sig_expr = build_const_signature_expr(method);
+        quote! {
+            const #sel_ident: [u8; 4] = ::pvm_contract_types::const_selector(#sig_expr);
+        }
+    } else {
+        let selector = compute_selector(&method.signature.canonical_signature());
+        let [s0, s1, s2, s3] = selector;
+        quote! {
+            const #sel_ident: [u8; 4] = [#s0, #s1, #s2, #s3];
+        }
+    };
 
     let fn_name = &method.fn_name;
     let param_names = &method.param_names;
     let decodes = generate_decode_params(&method.signature.inputs, use_alloc);
 
-    let min_size = calculate_min_input_size(&method.signature.inputs);
+    let min_size_expr = calculate_min_input_size(&method.signature.inputs);
 
-    let size_check = if min_size > 0 {
-        let min_size_lit = min_size;
+    let size_check = if !method.signature.inputs.is_empty() {
         quote! {
-            if input.len() < #min_size_lit {
+            if input.len() < (#min_size_expr) {
                 pallet_revive_uapi::HostFnImpl::return_value(
                     pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
             }
@@ -97,13 +140,15 @@ pub fn generate_dispatch_arm(
         }
     };
 
-    quote! {
-        [#s0, #s1, #s2, #s3] => {
+    let match_arm = quote! {
+        #sel_ident => {
             #size_check
             #(#decode_statements)*
             #body
         }
-    }
+    };
+
+    (const_def, match_arm)
 }
 
 fn has_dynamic_outputs(outputs: &[SolType]) -> bool {
@@ -161,15 +206,16 @@ fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStre
         })
         .collect();
 
-    let total_size: usize = outputs.iter().map(|t| t.head_size()).sum();
+    let total_size_expr = build_output_size_expr(outputs);
 
     quote! {{
-        let mut out = [0u8; #total_size];
+        const __OUT_SIZE: usize = #total_size_expr;
+        let mut out = [0u8; __OUT_SIZE];
         let mut offset = 0;
         #(
             let encoded = #encodes;
-            out[offset..offset + 32].copy_from_slice(&encoded);
-            offset += 32;
+            out[offset..offset + encoded.len()].copy_from_slice(&encoded);
+            offset += encoded.len();
         )*
         pallet_revive_uapi::HostFnImpl::return_value(
             pallet_revive_uapi::ReturnFlags::empty(), &out);
@@ -204,7 +250,7 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
         }};
     }
 
-    let head_size: usize = outputs.iter().map(|t| t.head_size()).sum();
+    let head_size_expr = build_output_size_expr(outputs);
 
     let encodes: Vec<_> = outputs
         .iter()
@@ -220,7 +266,7 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
             if ty.is_dynamic() {
                 let encode_tail = generate_dynamic_value_encode(ty, value_expr);
                 quote! {
-                    let offset = #head_size + tail.len();
+                    let offset = __head_size + tail.len();
                     let offset_value = ruint::aliases::U256::from(offset);
                     let mut offset_buf = [0u8; 32];
                     <ruint::aliases::U256 as ::pvm_contract_types::SolEncode>::encode_to(
@@ -242,7 +288,8 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
         .collect();
 
     quote! {{
-        let mut head = alloc::vec::Vec::with_capacity(#head_size);
+        let __head_size: usize = #head_size_expr;
+        let mut head = alloc::vec::Vec::with_capacity(__head_size);
         let mut tail = alloc::vec::Vec::new();
         #(#encodes)*
         head.extend_from_slice(&tail);
@@ -269,17 +316,15 @@ mod tests {
         };
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
-        let arm = generate_dispatch_arm(&method, &mod_name, true).to_string();
+        let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, true);
+        let arm = match_arm.to_string();
 
         assert!(arm.contains("encode_len"));
         assert!(!arm.contains("compile_error"));
     }
 
     #[test]
-    fn dispatch_selector_for_custom_type_matches_concrete_type() {
-        // When a method uses a type alias (e.g., `type Count = u64`), the
-        // generated dispatch arm must use the same selector that external
-        // callers compute from the ABI (which says "uint64").
+    fn dispatch_selector_for_custom_type_uses_const_selector() {
         let with_alias = MethodInfo {
             fn_name: syn::parse_str("set_count").unwrap(),
             signature: FunctionSignature {
@@ -290,50 +335,59 @@ mod tests {
             param_names: vec![syn::parse_str("count").unwrap()],
             returns_result: false,
         };
-        let with_concrete = MethodInfo {
-            fn_name: syn::parse_str("set_count").unwrap(),
-            signature: FunctionSignature {
-                name: "setCount".to_string(),
-                inputs: vec![SolType::Uint(64)],
-                outputs: vec![],
-            },
-            param_names: vec![syn::parse_str("count").unwrap()],
-            returns_result: false,
-        };
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
-        let _arm_alias = generate_dispatch_arm(&with_alias, &mod_name, false).to_string();
-        let _arm_concrete = generate_dispatch_arm(&with_concrete, &mod_name, false).to_string();
+        let (const_def, _match_arm) = generate_dispatch_arm(&with_alias, &mod_name, false);
+        let const_def_str = const_def.to_string();
 
-        // Extract the selector bytes [s0, s1, s2, s3] from both arms.
-        // They should be identical if type resolution is correct.
-        let expected_selector = compute_selector("setCount(uint64)");
-        let alias_selector =
-            compute_selector(&with_alias.signature.canonical_signature());
-
-        assert_eq!(
-            alias_selector, expected_selector,
-            "Dispatch selector mismatch: alias sig '{}' produces {:?}, \
-             but ABI sig 'setCount(uint64)' produces {:?}. Contract is unreachable.",
-            with_alias.signature.canonical_signature(),
-            alias_selector,
-            expected_selector,
+        assert!(
+            const_def_str.contains("const_selector"),
+            "Custom type inputs should use const_selector, got: {const_def_str}"
+        );
+        assert!(
+            const_def_str.contains("concatcp"),
+            "Custom type inputs should use concatcp for signature, got: {const_def_str}"
+        );
+        assert!(
+            const_def_str.contains("SOL_NAME"),
+            "Custom type inputs should reference SOL_NAME, got: {const_def_str}"
         );
     }
 
     #[test]
-    fn dispatch_min_input_size_accounts_for_custom_types() {
-        // Custom types report head_size=0, so the generated size check
-        // would accept empty calldata for methods that require 32+ bytes.
-        let inputs = vec![
-            SolType::Uint(64),
-            SolType::Custom("Count".to_string()),
-        ];
-        let min_size = calculate_min_input_size(&inputs);
-        assert_eq!(
-            min_size, 64,
-            "Two 32-byte params should require 64 bytes minimum, got {}",
-            min_size
+    fn dispatch_min_input_size_uses_head_size_for_custom_types() {
+        let inputs = vec![SolType::Uint(64), SolType::Custom("Count".to_string())];
+        let min_size_expr = calculate_min_input_size(&inputs).to_string();
+        assert!(
+            min_size_expr.contains("HEAD_SIZE"),
+            "Custom type input should use HEAD_SIZE trait const, got: {min_size_expr}"
+        );
+    }
+
+    #[test]
+    fn multi_output_with_custom_type_uses_dynamic_copy_size() {
+        let method = MethodInfo {
+            fn_name: syn::parse_str("get_line").unwrap(),
+            signature: FunctionSignature {
+                name: "getLine".to_string(),
+                inputs: vec![],
+                outputs: vec![SolType::Custom("Point".to_string()), SolType::Uint(64)],
+            },
+            param_names: vec![],
+            returns_result: false,
+        };
+        let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
+
+        let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, false);
+        let arm = match_arm.to_string();
+
+        assert!(
+            arm.contains("encoded . len ()"),
+            "Multi-output with Custom type must use encoded.len(), not hardcoded 32: {arm}"
+        );
+        assert!(
+            arm.contains("HEAD_SIZE"),
+            "Output buffer size should use HEAD_SIZE for Custom type: {arm}"
         );
     }
 
@@ -351,7 +405,8 @@ mod tests {
         };
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
-        let arm = generate_dispatch_arm(&method, &mod_name, false).to_string();
+        let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, false);
+        let arm = match_arm.to_string();
 
         assert!(arm.contains("compile_error"));
         assert!(arm.contains("requires an explicit allocator"));

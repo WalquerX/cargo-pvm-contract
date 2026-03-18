@@ -1,14 +1,10 @@
 //! Tests for type alias and nested custom type resolution in ABI generation.
 //!
-//! These tests assert CORRECT behavior. They currently FAIL, documenting the
-//! string-matching brittleness in `SolType::from_rust_type()`:
-//!
-//! - `type Count = u64` → becomes `SolType::Custom("Count")` → wrong canonical name,
-//!   wrong head_size (0), wrong selectors, wrong buffer sizes.
-//! - `Point` (a `#[derive(SolType)]` struct) used as a field → also becomes
-//!   `SolType::Custom("Point")` → same issues with offsets and sizes.
-//!
-//! After the refactor to trait-based type resolution, all these tests should pass.
+//! Validates that trait-based type resolution correctly handles:
+//! - Type aliases (`type Count = u64`) — resolved via `SolEncode::SOL_NAME` / `HEAD_SIZE`
+//! - Nested custom structs (`Line { a: Point, b: Point }`) — correct offset tracking
+//! - Containers with custom types (`[Point; 2]`, `(Count, u32)`) — inline expansion
+//! - Mixed structs (concrete + alias + custom fields)
 
 #[cfg(feature = "abi-reflection")]
 extern crate alloc;
@@ -118,7 +114,11 @@ fn triangle_encode_len() {
         c: AliasedPoint { x: 5, y: 6 },
     };
     // AliasedPoint = 64 bytes, Triangle = 3 * 64 = 192 bytes
-    assert_eq!(t.encode_len(), 192, "three 64-byte AliasedPoint fields = 192 bytes");
+    assert_eq!(
+        t.encode_len(),
+        192,
+        "three 64-byte AliasedPoint fields = 192 bytes"
+    );
 }
 
 #[test]
@@ -251,6 +251,58 @@ fn line_encoding_matches_flat_fields() {
         line_buf, flat_buf,
         "Line encoding must match flat (uint64,uint64,uint64,uint64)"
     );
+}
+
+// ========================================================================
+// Container-wrapped Custom types — Vec<Alias>, [Custom; N], (Custom, prim)
+// ========================================================================
+
+#[derive(Debug, PartialEq, Eq, SolType)]
+struct FixedPointArray {
+    points: [Point; 2],
+}
+
+#[test]
+fn fixed_array_of_custom_encode_len() {
+    let s = FixedPointArray {
+        points: [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }],
+    };
+    // [Point; 2] = 2 * 64 = 128 bytes
+    assert_eq!(s.encode_len(), 128, "[Point; 2] should be 128 bytes");
+}
+
+#[test]
+fn fixed_array_of_custom_roundtrip() {
+    let s = FixedPointArray {
+        points: [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }],
+    };
+    let len = s.encode_len();
+    let mut buf = vec![0u8; len];
+    s.encode_to(&mut buf);
+    let decoded = FixedPointArray::decode(&buf);
+    assert_eq!(decoded, s);
+}
+
+#[derive(Debug, PartialEq, Eq, SolType)]
+struct TupleWithAlias {
+    pair: (Count, u32),
+}
+
+#[test]
+fn tuple_with_alias_encode_len() {
+    let s = TupleWithAlias { pair: (42, 7) };
+    // (u64, u32) = 64 bytes
+    assert_eq!(s.encode_len(), 64, "(Count, u32) should be 64 bytes");
+}
+
+#[test]
+fn tuple_with_alias_roundtrip() {
+    let s = TupleWithAlias { pair: (42, 7) };
+    let len = s.encode_len();
+    let mut buf = vec![0u8; len];
+    s.encode_to(&mut buf);
+    let decoded = TupleWithAlias::decode(&buf);
+    assert_eq!(decoded, s);
 }
 
 // ========================================================================
