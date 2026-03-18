@@ -54,7 +54,7 @@ jobs:
       - name: Build revive-dev-node
         if: steps.cache-dev-node.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler clang
+          sudo apt-get update && sudo apt-get install -y git clang curl libssl-dev llvm libudev-dev make protobuf-compiler
           git init polkadot-sdk && cd polkadot-sdk
           git remote add origin https://github.com/paritytech/polkadot-sdk.git
           git fetch --depth 1 origin "$REVIVE_DEV_NODE_VERSION"
