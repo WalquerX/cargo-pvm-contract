@@ -12,6 +12,7 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,6 +54,7 @@ jobs:
       - name: Build revive-dev-node
         if: steps.cache-dev-node.outputs.cache-hit != 'true'
         run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler clang
           git init polkadot-sdk && cd polkadot-sdk
           git remote add origin https://github.com/paritytech/polkadot-sdk.git
           git fetch --depth 1 origin "$REVIVE_DEV_NODE_VERSION"
@@ -61,6 +63,8 @@ jobs:
           mkdir -p ~/bin && cp target/release/revive-dev-node ~/bin/
       - name: Add revive-dev-node to PATH
         run: echo "$HOME/bin" >> $GITHUB_PATH
+      - name: Build cargo-pvm-contract binary
+        run: cargo build -p cargo-pvm-contract
       - name: Run e2e tests
         run: cargo test -p pvm-contract-e2e-tests -- --test-threads=1
 
