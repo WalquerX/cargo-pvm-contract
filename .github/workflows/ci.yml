@@ -8,6 +8,7 @@ on:
 
 env:
   REVIVE_DEV_NODE_VERSION: 20311a9465b9ea0e28edd480cbfce8c3daa6b903
+  CI_UNIFIED_IMAGE: "docker.io/paritytech/ci-unified:bullseye-1.93.0-2026-01-27-v202602020922"
 
 jobs:
   test:
@@ -49,20 +50,21 @@ jobs:
         id: cache-dev-node
         uses: actions/cache@v4
         with:
-          path: ~/bin/revive-dev-node
+          path: revive-dev-node
           key: revive-dev-node-${{ env.REVIVE_DEV_NODE_VERSION }}
       - name: Build revive-dev-node
         if: steps.cache-dev-node.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update && sudo apt-get install -y git clang curl libssl-dev llvm libudev-dev make protobuf-compiler
-          git init polkadot-sdk && cd polkadot-sdk
-          git remote add origin https://github.com/paritytech/polkadot-sdk.git
-          git fetch --depth 1 origin "$REVIVE_DEV_NODE_VERSION"
-          git checkout FETCH_HEAD
-          cargo build -p revive-dev-node --release
-          mkdir -p ~/bin && cp target/release/revive-dev-node ~/bin/
-      - name: Add revive-dev-node to PATH
-        run: echo "$HOME/bin" >> $GITHUB_PATH
+          docker run --rm -v $GITHUB_WORKSPACE:/output -w /build $CI_UNIFIED_IMAGE bash -c "
+            git init . &&
+            git remote add origin https://github.com/paritytech/polkadot-sdk.git &&
+            git fetch --depth 1 origin $REVIVE_DEV_NODE_VERSION &&
+            git checkout FETCH_HEAD &&
+            cargo build -p revive-dev-node --release &&
+            cp target/release/revive-dev-node /output/
+          "
+      - name: Install revive-dev-node
+        run: sudo install revive-dev-node /usr/local/bin/
       - name: Build cargo-pvm-contract binary
         run: cargo build -p cargo-pvm-contract
       - name: Run e2e tests
