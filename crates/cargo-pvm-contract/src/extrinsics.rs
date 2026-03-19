@@ -87,8 +87,8 @@ pub fn instantiate_command(args: InstantiateArgs_) -> Result<()> {
     let rt = build_runtime();
 
     rt.block_on(async {
-        let mut builder = InstantiateCommandBuilder::new(opts, Code::Upload(code_bytes), data)
-            .value(args.value);
+        let mut builder =
+            InstantiateCommandBuilder::new(opts, Code::Upload(code_bytes), data).value(args.value);
 
         if let Some(ref salt_hex) = args.salt {
             builder = builder.salt(Some(hex_to_bytes(salt_hex)?));
@@ -175,10 +175,7 @@ pub fn call_command(args: CallArgs) -> Result<()> {
 pub fn remove_command(args: RemoveArgs) -> Result<()> {
     let hash_bytes = hex_to_bytes(&args.code_hash)?;
     if hash_bytes.len() != 32 {
-        anyhow::bail!(
-            "Code hash must be 32 bytes, got {}",
-            hash_bytes.len()
-        );
+        anyhow::bail!("Code hash must be 32 bytes, got {}", hash_bytes.len());
     }
     let code_hash = sp_core::H256::from_slice(&hash_bytes);
     let opts = build_opts(&args.extrinsic)?;
