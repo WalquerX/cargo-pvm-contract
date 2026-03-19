@@ -77,7 +77,7 @@ impl UploadCode {
 pub struct InstantiateWithCode {
     #[codec(compact)]
     value: u128,
-    gas_limit: Weight,
+    weight_limit: Weight,
     #[codec(compact)]
     storage_deposit_limit: u128,
     code: Vec<u8>,
@@ -88,7 +88,7 @@ pub struct InstantiateWithCode {
 impl InstantiateWithCode {
     pub fn new(
         value: u128,
-        gas_limit: sp_weights::Weight,
+        weight_limit: sp_weights::Weight,
         storage_deposit_limit: u128,
         code: Vec<u8>,
         data: Vec<u8>,
@@ -96,7 +96,7 @@ impl InstantiateWithCode {
     ) -> Self {
         Self {
             value,
-            gas_limit: gas_limit.into(),
+            weight_limit: weight_limit.into(),
             storage_deposit_limit,
             code,
             data,
@@ -115,7 +115,7 @@ impl InstantiateWithCode {
 pub struct Instantiate {
     #[codec(compact)]
     value: u128,
-    gas_limit: Weight,
+    weight_limit: Weight,
     #[codec(compact)]
     storage_deposit_limit: u128,
     code_hash: H256,
@@ -126,7 +126,7 @@ pub struct Instantiate {
 impl Instantiate {
     pub fn new(
         value: u128,
-        gas_limit: sp_weights::Weight,
+        weight_limit: sp_weights::Weight,
         storage_deposit_limit: u128,
         code_hash: H256,
         data: Vec<u8>,
@@ -134,7 +134,7 @@ impl Instantiate {
     ) -> Self {
         Self {
             value,
-            gas_limit: gas_limit.into(),
+            weight_limit: weight_limit.into(),
             storage_deposit_limit,
             code_hash,
             data,
@@ -154,7 +154,7 @@ pub struct Call {
     dest: H160,
     #[codec(compact)]
     value: u128,
-    gas_limit: Weight,
+    weight_limit: Weight,
     storage_deposit_limit: u128,
     data: Vec<u8>,
 }
@@ -163,14 +163,14 @@ impl Call {
     pub fn new(
         dest: H160,
         value: u128,
-        gas_limit: sp_weights::Weight,
+        weight_limit: sp_weights::Weight,
         storage_deposit_limit: u128,
         data: Vec<u8>,
     ) -> Self {
         Self {
             dest,
             value,
-            gas_limit: gas_limit.into(),
+            weight_limit: weight_limit.into(),
             storage_deposit_limit,
             data,
         }

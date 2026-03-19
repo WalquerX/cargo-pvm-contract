@@ -12,23 +12,25 @@ use subxt::utils::{H160, H256};
 #[derive(Clone, Eq, PartialEq, Encode, Decode, RuntimeDebug, TypeInfo)]
 pub struct ContractResult<R, Balance> {
     /// How much weight was consumed during execution.
-    pub gas_consumed: Weight,
-    /// How much weight is required as gas limit in order to execute this call.
-    pub gas_required: Weight,
+    pub weight_consumed: Weight,
+    /// How much weight is required as weight limit in order to execute this call.
+    pub weight_required: Weight,
     /// How much balance was paid by the origin into the contract's deposit account
     /// in order to pay for storage.
     pub storage_deposit: StorageDeposit<Balance>,
+    /// The maximal storage deposit amount that occurred at any point during execution.
+    pub max_storage_deposit: StorageDeposit<Balance>,
+    /// The amount of Ethereum gas that was consumed during execution.
+    pub gas_consumed: Balance,
     /// The execution result of the code.
-    pub result: R,
+    pub result: Result<R, DispatchError>,
 }
 
 /// Result type of a `bare_call` call, as well as `ContractsApi::call`.
-pub type ContractExecResult<Balance> =
-    ContractResult<Result<ExecReturnValue, DispatchError>, Balance>;
+pub type ContractExecResult<Balance> = ContractResult<ExecReturnValue, Balance>;
 
 /// Result type of a `bare_instantiate` call, as well as `ContractsApi::instantiate`.
-pub type ContractInstantiateResult<Balance> =
-    ContractResult<Result<InstantiateReturnValue, DispatchError>, Balance>;
+pub type ContractInstantiateResult<Balance> = ContractResult<InstantiateReturnValue, Balance>;
 
 /// Result type of a `bare_code_upload` call.
 pub type CodeUploadResult<Balance> = Result<CodeUploadReturnValue<Balance>, DispatchError>;
@@ -68,8 +70,8 @@ impl ExecReturnValue {
 pub struct InstantiateReturnValue {
     /// The output of the called constructor.
     pub result: ExecReturnValue,
-    /// The account id of the new contract.
-    pub account_id: H160,
+    /// The address of the new contract.
+    pub addr: H160,
 }
 
 /// The result of successfully uploading a contract.

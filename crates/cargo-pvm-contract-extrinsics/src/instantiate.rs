@@ -278,11 +278,11 @@ where
                 let ref_time = self
                     .args
                     .gas_limit
-                    .unwrap_or_else(|| instantiate_result.gas_required.ref_time());
+                    .unwrap_or_else(|| instantiate_result.weight_required.ref_time());
                 let proof_size = self
                     .args
                     .proof_size
-                    .unwrap_or_else(|| instantiate_result.gas_required.proof_size());
+                    .unwrap_or_else(|| instantiate_result.weight_required.proof_size());
                 let deposit_limit = self.args.storage_deposit_limit.unwrap_or(
                     match instantiate_result.storage_deposit {
                         StorageDeposit::Refund(_) => 0,

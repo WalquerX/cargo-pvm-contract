@@ -161,10 +161,10 @@ where
                     Ok(_) => {
                         let ref_time = self
                             .gas_limit
-                            .unwrap_or_else(|| call_result.gas_required.ref_time());
+                            .unwrap_or_else(|| call_result.weight_required.ref_time());
                         let proof_size = self
                             .proof_size
-                            .unwrap_or_else(|| call_result.gas_required.proof_size());
+                            .unwrap_or_else(|| call_result.weight_required.proof_size());
                         let storage_deposit_limit = self.opts.storage_deposit_limit().unwrap_or(
                             match call_result.storage_deposit {
                                 StorageDeposit::Refund(_) => 0,

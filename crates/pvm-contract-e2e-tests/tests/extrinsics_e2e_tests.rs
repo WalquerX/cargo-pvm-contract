@@ -47,10 +47,14 @@ async fn instantiate_dry_run_estimates_gas() {
         .expect("instantiate dry-run");
 
     assert!(
-        result.gas_required.ref_time() > 0,
-        "gas_required ref_time should be > 0"
+        result.weight_required.ref_time() > 0,
+        "weight_required ref_time should be > 0"
     );
-    assert!(result.result.is_ok(), "dry-run should succeed");
+    assert!(
+        result.result.is_ok(),
+        "dry-run should succeed, got: {:?}",
+        result.result
+    );
 }
 
 #[tokio::test]
