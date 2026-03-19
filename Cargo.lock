@@ -1211,6 +1211,7 @@ dependencies = [
  "anyhow",
  "askama",
  "assert_cmd",
+ "cargo-pvm-contract-extrinsics",
  "clap",
  "convert_case 0.6.0",
  "env_logger",
@@ -1222,8 +1223,13 @@ dependencies = [
  "predicates",
  "serde",
  "serde_json",
+ "sp-core",
+ "subxt",
+ "subxt-signer",
  "tempfile",
  "tiny-keccak",
+ "tokio",
+ "url",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ use log::debug;
 use std::path::PathBuf;
 
 mod encode_decode;
+mod extrinsics;
 mod scaffold;
 
 // Embed the templates directory into the binary
@@ -52,6 +53,16 @@ enum PvmContractCommand {
     Encode(EncodeArgs),
     /// Decode ABI-encoded hex calldata back to human-readable format
     Decode(DecodeArgs),
+    /// Upload contract code to the chain
+    Upload(UploadArgs),
+    /// Instantiate a contract (upload + deploy in one step)
+    Instantiate(InstantiateArgs_),
+    /// Call an existing contract
+    Call(CallArgs),
+    /// Remove uploaded contract code
+    Remove(RemoveArgs),
+    /// Map a Substrate account to an EVM address
+    MapAccount(MapAccountArgs),
 }
 
 #[derive(Args, Debug, Default)]
@@ -94,6 +105,89 @@ struct DecodeArgs {
     /// Decode as constructor (no 4-byte selector)
     #[arg(long, default_value_t = false)]
     constructor: bool,
+}
+
+/// Common options for extrinsics commands.
+#[derive(Args, Debug)]
+struct ExtrinsicArgs {
+    /// Websocket URL of the Substrate node
+    #[arg(long, default_value = "ws://localhost:9944")]
+    url: String,
+    /// Secret key URI for signing (e.g. //Alice)
+    #[arg(long, default_value = "//Alice")]
+    suri: String,
+    /// Storage deposit limit
+    #[arg(long)]
+    storage_deposit_limit: Option<u128>,
+}
+
+#[derive(Args, Debug)]
+struct UploadArgs {
+    /// Path to the .polkavm contract binary
+    #[arg(long)]
+    code: PathBuf,
+    /// Dry-run only (no on-chain submission)
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+    #[command(flatten)]
+    extrinsic: ExtrinsicArgs,
+}
+
+#[derive(Args, Debug)]
+struct InstantiateArgs_ {
+    /// Path to the .polkavm contract binary
+    #[arg(long)]
+    code: PathBuf,
+    /// Hex-encoded constructor arguments (0x-prefixed, optional)
+    #[arg(long)]
+    data: Option<String>,
+    /// Value to transfer to the contract
+    #[arg(long, default_value_t = 0)]
+    value: u128,
+    /// Salt for address derivation (hex, optional)
+    #[arg(long)]
+    salt: Option<String>,
+    /// Dry-run only (no on-chain submission)
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+    #[command(flatten)]
+    extrinsic: ExtrinsicArgs,
+}
+
+#[derive(Args, Debug)]
+struct CallArgs {
+    /// Contract address (0x-prefixed H160)
+    #[arg(long)]
+    contract: String,
+    /// Hex-encoded calldata (0x-prefixed)
+    #[arg(long)]
+    data: String,
+    /// Value to transfer with the call
+    #[arg(long, default_value_t = 0)]
+    value: u128,
+    /// Dry-run only (no on-chain submission)
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+    #[command(flatten)]
+    extrinsic: ExtrinsicArgs,
+}
+
+#[derive(Args, Debug)]
+struct RemoveArgs {
+    /// Code hash to remove (0x-prefixed H256)
+    #[arg(long)]
+    code_hash: String,
+    #[command(flatten)]
+    extrinsic: ExtrinsicArgs,
+}
+
+#[derive(Args, Debug)]
+struct MapAccountArgs {
+    /// Dry-run only (no on-chain submission)
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+    #[command(flatten)]
+    extrinsic: ExtrinsicArgs,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
@@ -246,6 +340,11 @@ fn handle_pvm_contract(args: PvmContractArgs) -> Result<()> {
         Some(PvmContractCommand::Init(init_args)) => init_command(init_args),
         Some(PvmContractCommand::Encode(encode_args)) => encode_command(encode_args),
         Some(PvmContractCommand::Decode(decode_args)) => decode_command(decode_args),
+        Some(PvmContractCommand::Upload(a)) => extrinsics::upload_command(a),
+        Some(PvmContractCommand::Instantiate(a)) => extrinsics::instantiate_command(a),
+        Some(PvmContractCommand::Call(a)) => extrinsics::call_command(a),
+        Some(PvmContractCommand::Remove(a)) => extrinsics::remove_command(a),
+        Some(PvmContractCommand::MapAccount(a)) => extrinsics::map_account_command(a),
         None => {
             // Legacy: treat flat args as init command
             let init_args = InitArgs {
