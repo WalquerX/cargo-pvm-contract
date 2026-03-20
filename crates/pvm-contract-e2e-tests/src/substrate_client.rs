@@ -6,9 +6,10 @@
 
 use anyhow::Result;
 use cargo_pvm_contract_extrinsics::{
-    CallCommandBuilder, Code, ContractBinary, ExtrinsicOptsBuilder, InstantiateCommandBuilder,
-    InstantiateExecResult, MapAccountCommandBuilder, MapAccountExecResult, RemoveCommandBuilder,
-    UploadCommandBuilder, UploadResult,
+    AccountData, CallCommandBuilder, Code, ContractBinary, ContractInfo, ExtrinsicOptsBuilder,
+    InstantiateCommandBuilder, InstantiateExecResult, MapAccountCommandBuilder,
+    MapAccountExecResult, RawParams, RemoveCommandBuilder, RpcRequest, UploadCommandBuilder,
+    UploadResult,
     pallet_revive_primitives::{CodeUploadResult, ContractExecResult, ContractInstantiateResult},
 };
 use subxt::{
@@ -155,6 +156,51 @@ impl SubstrateClient {
             .done()
             .await?;
         exec.remove_code().await.map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    // ── query helpers ───────────────────────────────────────────
+
+    async fn rpc_and_client(
+        &self,
+    ) -> Result<(
+        subxt::backend::legacy::LegacyRpcMethods<TestConfig>,
+        subxt::OnlineClient<TestConfig>,
+    )> {
+        let rpc_cli = subxt::backend::rpc::RpcClient::from_url(&self.ws_url).await?;
+        let client = subxt::OnlineClient::<TestConfig>::from_rpc_client(rpc_cli.clone()).await?;
+        let rpc = subxt::backend::legacy::LegacyRpcMethods::<TestConfig>::new(rpc_cli);
+        Ok((rpc, client))
+    }
+
+    pub async fn fetch_contract_info(&self, contract: &H160) -> Result<ContractInfo<u128>> {
+        let (rpc, client) = self.rpc_and_client().await?;
+        cargo_pvm_contract_extrinsics::fetch_contract_info(contract, &rpc, &client).await
+    }
+
+    pub async fn get_account_data(
+        &self,
+        account: &subxt::utils::AccountId32,
+    ) -> Result<AccountData<u128>> {
+        let (rpc, client) = self.rpc_and_client().await?;
+        cargo_pvm_contract_extrinsics::get_account_data(account, &rpc, &client).await
+    }
+
+    pub async fn resolve_h160(&self, addr: &H160) -> Result<subxt::utils::AccountId32> {
+        let (rpc, client) = self.rpc_and_client().await?;
+        cargo_pvm_contract_extrinsics::resolve_h160(addr, &rpc, &client).await
+    }
+
+    pub async fn fetch_all_contracts(&self) -> Result<Vec<H160>> {
+        let (rpc, client) = self.rpc_and_client().await?;
+        cargo_pvm_contract_extrinsics::fetch_all_contracts(&client, &rpc).await
+    }
+
+    pub async fn rpc_raw_call(&self, method: &str, params: &[String]) -> Result<String> {
+        let url = url::Url::parse(&self.ws_url)?;
+        let rpc = RpcRequest::new(&url).await?;
+        let raw_params = RawParams::new(params)?;
+        let result = rpc.raw_call(method, raw_params).await?;
+        Ok(result.get().to_string())
     }
 }
 

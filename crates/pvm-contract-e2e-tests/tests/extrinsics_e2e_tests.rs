@@ -170,6 +170,138 @@ async fn full_lifecycle_upload_instantiate_call() {
     assert_eq!(balance, 500);
 }
 
+#[tokio::test]
+async fn fetch_contract_info_after_instantiate() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, _) = build_mytoken();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode.clone()), vec![], &alice)
+        .await
+        .expect("instantiate");
+
+    let info = client
+        .fetch_contract_info(&deploy.contract_address)
+        .await
+        .expect("fetch_contract_info");
+
+    let expected_code_hash = subxt::utils::H256::from(
+        cargo_pvm_contract_extrinsics::ContractBinary(bytecode).code_hash(),
+    );
+    assert_eq!(*info.code_hash(), expected_code_hash);
+    assert_eq!(info.storage_bytes(), 0);
+}
+
+#[tokio::test]
+async fn fetch_contract_info_non_existent_fails() {
+    let (_node, client) = start_and_client();
+    let fake_addr = sp_core::H160::from_low_u64_be(0x99);
+
+    let result = client.fetch_contract_info(&fake_addr).await;
+    assert!(result.is_err(), "should fail for non-existent contract");
+}
+
+#[tokio::test]
+async fn get_account_data_for_alice() {
+    let (_node, client) = start_and_client();
+
+    let alice_id: subxt::utils::AccountId32 =
+        subxt_signer::sr25519::dev::alice().public_key().0.into();
+    let data = client
+        .get_account_data(&alice_id)
+        .await
+        .expect("get_account_data");
+
+    assert!(data.free > 0, "Alice should have a non-zero free balance");
+}
+
+#[tokio::test]
+async fn resolve_h160_for_mapped_account() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+
+    // Ensure Alice is mapped
+    let _ = client.map_account(&alice).await;
+
+    let alice_id_bytes = subxt_signer::sr25519::dev::alice().public_key().0;
+    let alice_h160 = cargo_pvm_contract_extrinsics::AccountIdMapper::to_address(&alice_id_bytes);
+
+    let resolved = client
+        .resolve_h160(&alice_h160)
+        .await
+        .expect("resolve_h160");
+
+    let expected_id: subxt::utils::AccountId32 = alice_id_bytes.into();
+    assert_eq!(resolved, expected_id);
+}
+
+#[tokio::test]
+async fn fetch_all_contracts_includes_deployed() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, _) = build_mytoken();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode), vec![], &alice)
+        .await
+        .expect("instantiate");
+
+    let contracts = client
+        .fetch_all_contracts()
+        .await
+        .expect("fetch_all_contracts");
+
+    assert!(
+        contracts.contains(&deploy.contract_address),
+        "deployed contract should appear in fetch_all_contracts"
+    );
+}
+
+#[tokio::test]
+async fn rpc_system_chain_returns_value() {
+    let (_node, client) = start_and_client();
+
+    let result = client
+        .rpc_raw_call("system_chain", &[])
+        .await
+        .expect("rpc system_chain");
+
+    assert!(
+        !result.is_empty(),
+        "system_chain should return a non-empty string"
+    );
+}
+
+#[tokio::test]
+async fn rpc_invalid_method_fails() {
+    let (_node, client) = start_and_client();
+
+    let result = client.rpc_raw_call("nonExistentMethod", &[]).await;
+    assert!(result.is_err(), "non-existent RPC method should fail");
+}
+
+#[tokio::test]
+async fn account_id_mapper_matches_on_chain_mapping() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+
+    // Map Alice's account
+    let map_result = match client.map_account(&alice).await {
+        Ok(r) => r.address,
+        Err(e) if e.to_string().contains("AccountAlreadyMapped") => {
+            let alice_id = subxt_signer::sr25519::dev::alice().public_key().0;
+            cargo_pvm_contract_extrinsics::AccountIdMapper::to_address(&alice_id)
+        }
+        Err(e) => panic!("map_account: {e}"),
+    };
+
+    // Local derivation should match what the chain returned
+    let alice_id = subxt_signer::sr25519::dev::alice().public_key().0;
+    let local_h160 = cargo_pvm_contract_extrinsics::AccountIdMapper::to_address(&alice_id);
+    assert_eq!(local_h160, map_result);
+}
+
 /// Decode a big-endian uint256 (32 bytes) into a u128.
 fn uint256_from_bytes(data: &[u8]) -> u128 {
     assert!(data.len() >= 32, "uint256 needs at least 32 bytes");

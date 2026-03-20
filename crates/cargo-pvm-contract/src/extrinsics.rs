@@ -6,7 +6,10 @@ use cargo_pvm_contract_extrinsics::{
 use sp_core::H160;
 use subxt_signer::sr25519::Keypair;
 
-use crate::{CallArgs, ExtrinsicArgs, InstantiateArgs_, MapAccountArgs, RemoveArgs, UploadArgs};
+use crate::{
+    AccountArgs, CallArgs, ExtrinsicArgs, InfoArgs, InstantiateArgs_, MapAccountArgs, RemoveArgs,
+    RpcArgs, UploadArgs,
+};
 
 type Conf = subxt::config::SubstrateConfig;
 type Signer = Keypair;
@@ -126,14 +129,7 @@ pub fn instantiate_command(args: InstantiateArgs_) -> Result<()> {
 }
 
 pub fn call_command(args: CallArgs) -> Result<()> {
-    let contract_bytes = hex_to_bytes(&args.contract)?;
-    if contract_bytes.len() != 20 {
-        anyhow::bail!(
-            "Contract address must be 20 bytes, got {}",
-            contract_bytes.len()
-        );
-    }
-    let contract = H160::from_slice(&contract_bytes);
+    let contract = AddrKind::from(&args.contract)?.to_h160();
     let call_data = hex_to_bytes(&args.data)?;
     let opts = build_opts(&args.extrinsic)?;
     let rt = build_runtime();
@@ -218,6 +214,122 @@ pub fn map_account_command(args: MapAccountArgs) -> Result<()> {
                     }
                 }
             }
+        }
+        Ok(())
+    })
+}
+
+pub fn info_command(args: InfoArgs) -> Result<()> {
+    let contract = AddrKind::from(&args.contract)?.to_h160();
+    let url = url::Url::parse(&args.url).context("Invalid node URL")?;
+    let rt = build_runtime();
+
+    rt.block_on(async {
+        let rpc_cli = subxt::backend::rpc::RpcClient::from_url(
+            cargo_pvm_contract_extrinsics::url_to_string(&url),
+        )
+        .await?;
+        let client = subxt::OnlineClient::<Conf>::from_rpc_client(rpc_cli.clone()).await?;
+        let rpc = subxt::backend::legacy::LegacyRpcMethods::<Conf>::new(rpc_cli);
+
+        let info =
+            cargo_pvm_contract_extrinsics::fetch_contract_info(&contract, &rpc, &client).await?;
+        println!("{}", info.to_json()?);
+        Ok(())
+    })
+}
+
+pub fn rpc_command(args: RpcArgs) -> Result<()> {
+    let url = url::Url::parse(&args.url).context("Invalid node URL")?;
+    let rt = build_runtime();
+
+    rt.block_on(async {
+        let rpc = cargo_pvm_contract_extrinsics::RpcRequest::new(&url).await?;
+        let params = cargo_pvm_contract_extrinsics::RawParams::new(&args.params)?;
+        let result = rpc.raw_call(&args.method, params).await?;
+        println!("{}", result.get());
+        Ok(())
+    })
+}
+
+/// Determine whether the address is an H160 (0x-prefixed, 20 bytes) or an SS58 Substrate
+/// account.
+enum AddrKind {
+    H160(sp_core::H160),
+    Substrate(subxt::utils::AccountId32),
+}
+
+impl AddrKind {
+    fn from(addr: &str) -> Result<Self> {
+        if addr.starts_with("0x") || addr.starts_with("0X") {
+            let bytes = hex_to_bytes(addr)?;
+            if bytes.len() == 20 {
+                Ok(AddrKind::H160(sp_core::H160::from_slice(&bytes)))
+            } else {
+                anyhow::bail!("H160 address must be 20 bytes, got {}", bytes.len());
+            }
+        } else {
+            let account_id: subxt::utils::AccountId32 = addr.parse().map_err(|_| {
+                anyhow::anyhow!("Invalid address: not a valid H160 or SS58 address")
+            })?;
+            Ok(AddrKind::Substrate(account_id))
+        }
+    }
+
+    fn to_h160(&self) -> H160 {
+        match self {
+            AddrKind::H160(h) => *h,
+            AddrKind::Substrate(id) => {
+                cargo_pvm_contract_extrinsics::AccountIdMapper::to_address(&id.0)
+            }
+        }
+    }
+
+    async fn to_account_id(
+        &self,
+        rpc: &subxt::backend::legacy::LegacyRpcMethods<Conf>,
+        client: &subxt::OnlineClient<Conf>,
+    ) -> Result<subxt::utils::AccountId32> {
+        match self {
+            AddrKind::H160(h160) => {
+                cargo_pvm_contract_extrinsics::resolve_h160(h160, rpc, client).await
+            }
+            AddrKind::Substrate(id) => Ok(id.clone()),
+        }
+    }
+}
+
+pub fn account_command(args: AccountArgs) -> Result<()> {
+    let addr_kind = AddrKind::from(&args.addr)?;
+    let url = url::Url::parse(&args.url).context("Invalid node URL")?;
+    let rt = build_runtime();
+
+    rt.block_on(async {
+        let rpc_cli = subxt::backend::rpc::RpcClient::from_url(
+            cargo_pvm_contract_extrinsics::url_to_string(&url),
+        )
+        .await?;
+        let client = subxt::OnlineClient::<Conf>::from_rpc_client(rpc_cli.clone()).await?;
+        let rpc = subxt::backend::legacy::LegacyRpcMethods::<Conf>::new(rpc_cli);
+
+        let account_id = addr_kind.to_account_id(&rpc, &client).await?;
+
+        let account_data =
+            cargo_pvm_contract_extrinsics::get_account_data(&account_id, &rpc, &client).await?;
+
+        if args.output_json {
+            let output = serde_json::json!({
+                "account_id": format!("{account_id}"),
+                "free": account_data.free.to_string(),
+                "reserved": account_data.reserved.to_string(),
+                "frozen": account_data.frozen.to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("Account Id: {account_id}");
+            println!("Free Balance: {}", account_data.free);
+            println!("Reserved: {}", account_data.reserved);
+            println!("Frozen: {}", account_data.frozen);
         }
         Ok(())
     })

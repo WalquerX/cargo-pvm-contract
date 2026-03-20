@@ -63,6 +63,12 @@ enum PvmContractCommand {
     Remove(RemoveArgs),
     /// Map a Substrate account to an EVM address
     MapAccount(MapAccountArgs),
+    /// Query on-chain contract info by address
+    Info(InfoArgs),
+    /// Execute a raw RPC call against the node
+    Rpc(RpcArgs),
+    /// Display account info for an H160 address (balance, account ID)
+    Account(AccountArgs),
 }
 
 #[derive(Args, Debug, Default)]
@@ -188,6 +194,42 @@ struct MapAccountArgs {
     dry_run: bool,
     #[command(flatten)]
     extrinsic: ExtrinsicArgs,
+}
+
+#[derive(Args, Debug)]
+struct InfoArgs {
+    /// Contract address (0x-prefixed H160)
+    #[arg(long)]
+    contract: String,
+    /// Websocket URL of the Substrate node
+    #[arg(long, default_value = "ws://localhost:9944")]
+    url: String,
+}
+
+#[derive(Args, Debug)]
+struct RpcArgs {
+    /// RPC method name (e.g. system_chain, system_version)
+    #[arg(long)]
+    method: String,
+    /// RPC parameters (JSON values, space-separated)
+    #[arg(trailing_var_arg = true)]
+    params: Vec<String>,
+    /// Websocket URL of the Substrate node
+    #[arg(long, default_value = "ws://localhost:9944")]
+    url: String,
+}
+
+#[derive(Args, Debug)]
+struct AccountArgs {
+    /// H160 address to look up (0x-prefixed)
+    #[arg(long)]
+    addr: String,
+    /// Output in JSON format
+    #[arg(long, default_value_t = false)]
+    output_json: bool,
+    /// Websocket URL of the Substrate node
+    #[arg(long, default_value = "ws://localhost:9944")]
+    url: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
@@ -345,6 +387,9 @@ fn handle_pvm_contract(args: PvmContractArgs) -> Result<()> {
         Some(PvmContractCommand::Call(a)) => extrinsics::call_command(a),
         Some(PvmContractCommand::Remove(a)) => extrinsics::remove_command(a),
         Some(PvmContractCommand::MapAccount(a)) => extrinsics::map_account_command(a),
+        Some(PvmContractCommand::Info(a)) => extrinsics::info_command(a),
+        Some(PvmContractCommand::Rpc(a)) => extrinsics::rpc_command(a),
+        Some(PvmContractCommand::Account(a)) => extrinsics::account_command(a),
         None => {
             // Legacy: treat flat args as init command
             let init_args = InitArgs {
