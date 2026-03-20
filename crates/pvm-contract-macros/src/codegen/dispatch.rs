@@ -13,6 +13,61 @@ pub struct MethodInfo {
     pub returns_result: bool,
 }
 
+pub(super) struct ParamDecoding {
+    pub size_check: TokenStream,
+    pub decode_statements: Vec<TokenStream>,
+    pub call_args: Vec<TokenStream>,
+}
+
+pub(super) fn generate_param_decoding(
+    param_names: &[syn::Ident],
+    sol_types: &[SolType],
+    use_alloc: bool,
+) -> ParamDecoding {
+    let decodes = generate_decode_params(sol_types, use_alloc);
+    let min_size_expr = calculate_min_input_size(sol_types);
+
+    let size_check = if !sol_types.is_empty() {
+        quote! {
+            if input.len() < (#min_size_expr) {
+                pallet_revive_uapi::HostFnImpl::return_value(
+                    pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let needs_runtime_offset = has_custom_types(sol_types);
+    let offset_init = if needs_runtime_offset {
+        quote! { let mut __decode_offset: usize = 0; }
+    } else {
+        quote! {}
+    };
+
+    let decode_statements = std::iter::once(offset_init)
+        .chain(
+            param_names
+                .iter()
+                .zip(decodes.iter())
+                .map(|(name, decode)| {
+                    quote! { let #name = #decode; }
+                }),
+        )
+        .collect();
+
+    let call_args = param_names
+        .iter()
+        .map(|name| quote!(::core::convert::Into::into(#name)))
+        .collect();
+
+    ParamDecoding {
+        size_check,
+        decode_statements,
+        call_args,
+    }
+}
+
 fn build_const_signature_expr(method: &MethodInfo) -> TokenStream {
     let fn_name = &method.signature.name;
     let mut parts: Vec<TokenStream> = Vec::new();
@@ -65,44 +120,13 @@ pub fn generate_dispatch_arm(
     };
 
     let fn_name = &method.fn_name;
-    let param_names = &method.param_names;
-    let decodes = generate_decode_params(&method.signature.inputs, use_alloc);
-
-    let min_size_expr = calculate_min_input_size(&method.signature.inputs);
-
-    let size_check = if !method.signature.inputs.is_empty() {
-        quote! {
-            if input.len() < (#min_size_expr) {
-                pallet_revive_uapi::HostFnImpl::return_value(
-                    pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
-            }
-        }
-    } else {
-        quote! {}
-    };
-
-    let needs_runtime_offset = has_custom_types(&method.signature.inputs);
-    let offset_init = if needs_runtime_offset {
-        quote! { let mut __decode_offset: usize = 0; }
-    } else {
-        quote! {}
-    };
-
-    let decode_statements: Vec<_> = std::iter::once(offset_init)
-        .chain(
-            param_names
-                .iter()
-                .zip(decodes.iter())
-                .map(|(name, decode)| {
-                    quote! { let #name = #decode; }
-                }),
-        )
-        .collect();
-
-    let call_args: Vec<_> = param_names
-        .iter()
-        .map(|name| quote!(::core::convert::Into::into(#name)))
-        .collect();
+    let decoding =
+        generate_param_decoding(&method.param_names, &method.signature.inputs, use_alloc);
+    let ParamDecoding {
+        size_check,
+        decode_statements,
+        call_args,
+    } = decoding;
     let has_return = !method.signature.outputs.is_empty();
     let encode_and_return = generate_encode_and_return(&method.signature.outputs, use_alloc);
 
