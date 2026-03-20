@@ -2191,13 +2191,13 @@ dependencies = [
 name = "pvm-contract-macros"
 version = "0.3.0"
 dependencies = [
+ "keccak-const",
  "proc-macro2",
  "pvm-contract-types",
  "quote",
  "ruint",
  "serde_json",
  "syn 2.0.114",
- "tiny-keccak",
 ]
 
 [[package]]
@@ -2207,6 +2207,7 @@ dependencies = [
  "alloy-core",
  "const_format",
  "criterion",
+ "keccak-const",
  "proptest",
  "pvm-contract-macros",
  "ruint",

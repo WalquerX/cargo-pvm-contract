@@ -9,8 +9,6 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 mod alloc_types;
 
-mod const_keccak;
-
 #[doc(hidden)]
 pub use const_format;
 use ruint::aliases::U256;
@@ -48,7 +46,7 @@ impl AsRef<[u8]> for Address {
 
 /// Computes the 4-byte Solidity function selector at compile time.
 pub const fn const_selector(sig: &str) -> [u8; 4] {
-    let hash = const_keccak::keccak256(sig.as_bytes());
+    let hash = keccak_const::Keccak256::new().update(sig.as_bytes()).finalize();
     [hash[0], hash[1], hash[2], hash[3]]
 }
 
