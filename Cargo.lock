@@ -2195,6 +2195,7 @@ dependencies = [
  "pvm-contract-types",
  "quote",
  "ruint",
+ "serde_json",
  "syn 2.0.114",
  "tiny-keccak",
 ]
