@@ -46,7 +46,9 @@ impl AsRef<[u8]> for Address {
 
 /// Computes the 4-byte Solidity function selector at compile time.
 pub const fn const_selector(sig: &str) -> [u8; 4] {
-    let hash = keccak_const::Keccak256::new().update(sig.as_bytes()).finalize();
+    let hash = keccak_const::Keccak256::new()
+        .update(sig.as_bytes())
+        .finalize();
     [hash[0], hash[1], hash[2], hash[3]]
 }
 
