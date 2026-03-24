@@ -163,6 +163,7 @@ cargo pvm-contract upload \
 # Submit on-chain
 cargo pvm-contract upload \
   --code target/my_contract.release.polkavm \
+  --storage-deposit-limit 1000000000000 \
   --url ws://localhost:9944 \
   --suri //Alice
 ```
@@ -197,6 +198,7 @@ See [Common Options](#common-options) for `--url`, `--suri`, and `--storage-depo
 # Instantiate without constructor args
 cargo pvm-contract instantiate \
   --code target/my_contract.release.polkavm \
+  --storage-deposit-limit 1000000000000 \
   --url ws://localhost:9944 \
   --suri //Alice
 
@@ -208,6 +210,7 @@ CONSTRUCTOR=$(cargo pvm-contract encode \
 cargo pvm-contract instantiate \
   --code target/my_contract.release.polkavm \
   --data $CONSTRUCTOR \
+  --storage-deposit-limit 1000000000000 \
   --url ws://localhost:9944 \
   --suri //Alice
 ```
@@ -265,6 +268,8 @@ cargo pvm-contract call \
 ### `remove` — Remove uploaded contract code
 
 Remove a previously uploaded contract code blob from the chain by its code hash. This frees storage and recovers the deposit.
+
+> **Note:** Removal fails if any active contract instance still references the code hash. Terminate all contracts using the code before removing it.
 
 **Usage**
 
@@ -389,32 +394,38 @@ cargo pvm-contract rpc \
 
 ### `account` — Query account balance and info
 
-Display the balance and Substrate account ID for a given H160 address.
+Display the balance and Substrate account ID for a given address. Accepts either an H160 (0x-prefixed, 20-byte Ethereum-style) or an SS58 (Substrate) address.
 
 **Usage**
 
 ```
-cargo pvm-contract account --addr <H160> [--url <WS_URL>] [--output-json]
+cargo pvm-contract account --addr <ADDR> [--url <WS_URL>] [--output-json]
 ```
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--addr <H160>` | — | H160 address to look up (0x-prefixed) |
+| `--addr <ADDR>` | — | H160 (0x-prefixed) or SS58 address to look up |
 | `--url <WS_URL>` | `ws://localhost:9944` | Websocket URL of the Substrate node |
 | `--output-json` | false | Print output as JSON |
 
 **Example**
 
 ```bash
+# Query by contract address (H160)
 cargo pvm-contract account \
-  --addr 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 \
+  --addr 0x2c6fc00458f198f46ef072e1516b83cd56db7cf5 \
+  --url ws://localhost:9944
+
+# Query by Substrate SS58 address
+cargo pvm-contract account \
+  --addr 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY \
   --url ws://localhost:9944
 
 # JSON output
 cargo pvm-contract account \
-  --addr 0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045 \
+  --addr 0x2c6fc00458f198f46ef072e1516b83cd56db7cf5 \
   --url ws://localhost:9944 \
   --output-json
 ```
@@ -455,6 +466,7 @@ cargo +nightly build --release -Z build-std=core,alloc \
 # 3. Upload the bytecode to a local node
 cargo pvm-contract upload \
   --code target/riscv64emac-unknown-none-polkavm/release/my-token.polkavm \
+  --storage-deposit-limit 1000000000000 \
   --url ws://localhost:9944 \
   --suri //Alice
 
@@ -467,6 +479,7 @@ CONSTRUCTOR=$(cargo pvm-contract encode \
 cargo pvm-contract instantiate \
   --code target/riscv64emac-unknown-none-polkavm/release/my-token.polkavm \
   --data $CONSTRUCTOR \
+  --storage-deposit-limit 1000000000000 \
   --url ws://localhost:9944 \
   --suri //Alice
 # → outputs contract address, e.g. 0xABCDEF...
