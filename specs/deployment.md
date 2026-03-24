@@ -7,7 +7,18 @@ target/my_contract.release.polkavm    — deployable bytecode
 target/my_contract.release.abi.json   — Ethereum-compatible ABI JSON
 ```
 
-Since contracts use the Ethereum ABI, you can deploy and interact with them using standard Ethereum tooling.
+Since contracts use the Ethereum ABI, you can deploy and interact with them using **two paths**:
+
+| Path | Tooling | When to use |
+|------|---------|-------------|
+| **Substrate (recommended)** | `cargo pvm-contract` subcommands | Native Substrate RPC, full `pallet-revive` control, no Ethereum dependencies |
+| **Ethereum compatibility** | `cast` + `anvil-polkadot` | Existing Ethereum tooling, ethers.js, scripting with standard EVM tools |
+
+See [cli.md](cli.md) for the full `cargo pvm-contract` CLI reference (Substrate path). The rest of this document covers the Ethereum compatibility path.
+
+---
+
+## Ethereum Compatibility Path
 
 ## Install foundry-polkadot
 

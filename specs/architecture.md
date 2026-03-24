@@ -39,4 +39,5 @@ See [builder-dsl.md](builder-dsl.md) for full usage.
 - [builder-dsl.md](builder-dsl.md) — `ContractBuilder` dispatch
 - [abi.md](abi.md) — ABI encoding/decoding, type mapping, wire format
 - [build.md](build.md) — scaffolding, build pipeline, generated project structure
-- [deployment.md](deployment.md) — deploying `.polkavm` bytecode, interacting with contracts
+- [deployment.md](deployment.md) — deploying `.polkavm` bytecode using Ethereum tooling (cast/anvil-polkadot)
+- [cli.md](cli.md) — native Substrate CLI reference (`cargo pvm-contract` subcommands)

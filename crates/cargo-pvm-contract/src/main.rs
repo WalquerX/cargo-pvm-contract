@@ -28,26 +28,12 @@ enum CargoSubcommand {
 #[derive(Args, Debug)]
 struct PvmContractArgs {
     #[command(subcommand)]
-    command: Option<PvmContractCommand>,
-
-    // Legacy flat init flags (for backwards compatibility when no subcommand given)
-    #[arg(long, value_enum)]
-    init_type: Option<InitType>,
-    #[arg(long)]
-    example: Option<String>,
-    #[arg(long, value_enum)]
-    api_style: Option<ApiStyle>,
-    #[arg(long, value_enum)]
-    allocator: Option<Allocator>,
-    #[arg(long)]
-    name: Option<String>,
-    #[arg(long)]
-    sol_file: Option<PathBuf>,
+    command: PvmContractCommand,
 }
 
 #[derive(Subcommand, Debug)]
 enum PvmContractCommand {
-    /// Initialize a new contract project (default when no subcommand is given)
+    /// Initialize a new contract project
     Init(InitArgs),
     /// Encode a function call or constructor into ABI-encoded hex calldata
     Encode(EncodeArgs),
@@ -71,7 +57,7 @@ enum PvmContractCommand {
     Account(AccountArgs),
 }
 
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug)]
 struct InitArgs {
     #[arg(long, value_enum)]
     init_type: Option<InitType>,
@@ -379,29 +365,17 @@ fn main() -> Result<()> {
 
 fn handle_pvm_contract(args: PvmContractArgs) -> Result<()> {
     match args.command {
-        Some(PvmContractCommand::Init(init_args)) => init_command(init_args),
-        Some(PvmContractCommand::Encode(encode_args)) => encode_command(encode_args),
-        Some(PvmContractCommand::Decode(decode_args)) => decode_command(decode_args),
-        Some(PvmContractCommand::Upload(a)) => extrinsics::upload_command(a),
-        Some(PvmContractCommand::Instantiate(a)) => extrinsics::instantiate_command(a),
-        Some(PvmContractCommand::Call(a)) => extrinsics::call_command(a),
-        Some(PvmContractCommand::Remove(a)) => extrinsics::remove_command(a),
-        Some(PvmContractCommand::MapAccount(a)) => extrinsics::map_account_command(a),
-        Some(PvmContractCommand::Info(a)) => extrinsics::info_command(a),
-        Some(PvmContractCommand::Rpc(a)) => extrinsics::rpc_command(a),
-        Some(PvmContractCommand::Account(a)) => extrinsics::account_command(a),
-        None => {
-            // Legacy: treat flat args as init command
-            let init_args = InitArgs {
-                init_type: args.init_type,
-                example: args.example,
-                api_style: args.api_style,
-                allocator: args.allocator,
-                name: args.name,
-                sol_file: args.sol_file,
-            };
-            init_command(init_args)
-        }
+        PvmContractCommand::Init(init_args) => init_command(init_args),
+        PvmContractCommand::Encode(encode_args) => encode_command(encode_args),
+        PvmContractCommand::Decode(decode_args) => decode_command(decode_args),
+        PvmContractCommand::Upload(a) => extrinsics::upload_command(a),
+        PvmContractCommand::Instantiate(a) => extrinsics::instantiate_command(a),
+        PvmContractCommand::Call(a) => extrinsics::call_command(a),
+        PvmContractCommand::Remove(a) => extrinsics::remove_command(a),
+        PvmContractCommand::MapAccount(a) => extrinsics::map_account_command(a),
+        PvmContractCommand::Info(a) => extrinsics::info_command(a),
+        PvmContractCommand::Rpc(a) => extrinsics::rpc_command(a),
+        PvmContractCommand::Account(a) => extrinsics::account_command(a),
     }
 }
 
