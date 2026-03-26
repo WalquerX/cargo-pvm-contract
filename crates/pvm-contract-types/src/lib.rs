@@ -73,11 +73,6 @@ pub trait SolEncode {
     fn encode_tail_to(&self, buf: &mut [u8]) {
         self.encode_to(buf);
     }
-
-    #[cfg(feature = "abi-reflection")]
-    fn sol_name() -> alloc::string::String {
-        alloc::string::String::from(Self::SOL_NAME)
-    }
 }
 
 /// Marker trait for types with compile-time known encoded size.

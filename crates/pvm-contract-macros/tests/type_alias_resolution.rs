@@ -6,9 +6,6 @@
 //! - Containers with custom types (`[Point; 2]`, `(Count, u32)`) — inline expansion
 //! - Mixed structs (concrete + alias + custom fields)
 
-#[cfg(feature = "abi-reflection")]
-extern crate alloc;
-
 use pvm_contract_macros::SolType;
 use pvm_contract_types::{SolDecode, SolEncode};
 use ruint::aliases::U256;
@@ -309,45 +306,50 @@ fn tuple_with_alias_roundtrip() {
 // sol_name tests — catch the canonical_name string-matching bug
 // ========================================================================
 
-#[cfg(feature = "abi-reflection")]
 mod sol_name_tests {
     use super::*;
 
     #[test]
     fn simple_alias_sol_name() {
-        assert_eq!(SimpleAlias::sol_name(), "(uint64)");
+        assert_eq!(<SimpleAlias as SolEncode>::SOL_NAME, "(uint64)");
     }
 
     #[test]
     fn multi_alias_sol_name() {
-        assert_eq!(MultiAlias::sol_name(), "(address,uint256)");
+        assert_eq!(<MultiAlias as SolEncode>::SOL_NAME, "(address,uint256)");
     }
 
     #[test]
     fn point_sol_name() {
-        assert_eq!(Point::sol_name(), "(uint64,uint64)");
+        assert_eq!(<Point as SolEncode>::SOL_NAME, "(uint64,uint64)");
     }
 
     #[test]
     fn line_sol_name() {
-        assert_eq!(Line::sol_name(), "((uint64,uint64),(uint64,uint64))");
+        assert_eq!(
+            <Line as SolEncode>::SOL_NAME,
+            "((uint64,uint64),(uint64,uint64))"
+        );
     }
 
     #[test]
     fn aliased_point_sol_name() {
-        assert_eq!(AliasedPoint::sol_name(), "(uint64,uint64)");
+        assert_eq!(<AliasedPoint as SolEncode>::SOL_NAME, "(uint64,uint64)");
     }
 
     #[test]
     fn triangle_sol_name() {
         assert_eq!(
-            Triangle::sol_name(),
+            <Triangle as SolEncode>::SOL_NAME,
             "((uint64,uint64),(uint64,uint64),(uint64,uint64))"
         );
     }
 
     #[test]
     fn mixed_struct_sol_name() {
-        assert_eq!(MixedStruct::sol_name(), "(uint32,uint64,(uint64,uint64))");
+        assert_eq!(
+            <MixedStruct as SolEncode>::SOL_NAME,
+            "(uint32,uint64,(uint64,uint64))"
+        );
     }
 }

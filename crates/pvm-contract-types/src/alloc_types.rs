@@ -108,11 +108,6 @@ impl<T: SolEncode> SolEncode for alloc::vec::Vec<T> {
             }
         }
     }
-
-    #[cfg(feature = "abi-reflection")]
-    fn sol_name() -> alloc::string::String {
-        alloc::format!("{}[]", T::sol_name())
-    }
 }
 
 impl<T: SolDecode> SolDecode for alloc::vec::Vec<T> {
