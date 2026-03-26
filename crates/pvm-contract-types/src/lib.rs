@@ -13,6 +13,62 @@ mod alloc_types;
 pub use const_format;
 use ruint::aliases::U256;
 
+/// Fixed-size buffer for compile-time string concatenation.
+///
+/// Use [`ConstStr::new`] to concatenate two `&str` values in a `const`
+/// context, then call [`ConstStr::as_str`] to obtain the resulting `&str`.
+pub struct ConstStr {
+    buf: [u8; 256],
+    len: usize,
+}
+
+impl ConstStr {
+    /// Concatenates `a` and `b` into a new [`ConstStr`].
+    pub const fn new(a: &str, b: &str) -> Self {
+        let a = a.as_bytes();
+        let b = b.as_bytes();
+        let len = a.len() + b.len();
+        assert!(len <= 256, "concatenated string exceeds 256 bytes");
+
+        let mut buf = [0u8; 256];
+        let mut i = 0;
+        while i < a.len() {
+            buf[i] = a[i];
+            i += 1;
+        }
+        let mut j = 0;
+        while j < b.len() {
+            buf[i + j] = b[j];
+            j += 1;
+        }
+        Self { buf, len }
+    }
+
+    /// Appends `s` to this [`ConstStr`], returning a new [`ConstStr`].
+    pub const fn append(self, s: &str) -> Self {
+        let s = s.as_bytes();
+        let new_len = self.len + s.len();
+        assert!(new_len <= 256, "appended string exceeds 256 bytes");
+
+        let mut buf = self.buf;
+        let mut i = 0;
+        while i < s.len() {
+            buf[self.len + i] = s[i];
+            i += 1;
+        }
+        Self { buf, len: new_len }
+    }
+
+    /// Returns the concatenated string as a `&str`.
+    pub const fn as_str(&self) -> &str {
+        let (used, _) = self.buf.split_at(self.len);
+        match core::str::from_utf8(used) {
+            Ok(s) => s,
+            Err(_) => panic!("invalid UTF-8"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Address(pub [u8; 20]);
 

@@ -832,44 +832,43 @@ fn sol_type_name_dynamic_types() {
 // ========================================================================
 // Vec<T> SOL_NAME verification for various element types
 // ========================================================================
-// Fails - return dynamic[]
 
-// #[test]
-// fn vec_sol_name_for_primitive_types() {
-//     assert_eq!(<Vec<u8> as SolEncode>::SOL_NAME, "uint8[]");
-//     assert_eq!(<Vec<u16> as SolEncode>::SOL_NAME, "uint16[]");
-//     assert_eq!(<Vec<u32> as SolEncode>::SOL_NAME, "uint32[]");
-//     assert_eq!(<Vec<u64> as SolEncode>::SOL_NAME, "uint64[]");
-//     assert_eq!(<Vec<u128> as SolEncode>::SOL_NAME, "uint128[]");
-//     assert_eq!(<Vec<U256> as SolEncode>::SOL_NAME, "uint256[]");
-//     assert_eq!(<Vec<i8> as SolEncode>::SOL_NAME, "int8[]");
-//     assert_eq!(<Vec<i16> as SolEncode>::SOL_NAME, "int16[]");
-//     assert_eq!(<Vec<i32> as SolEncode>::SOL_NAME, "int32[]");
-//     assert_eq!(<Vec<i64> as SolEncode>::SOL_NAME, "int64[]");
-//     assert_eq!(<Vec<i128> as SolEncode>::SOL_NAME, "int128[]");
-//     assert_eq!(<Vec<bool> as SolEncode>::SOL_NAME, "bool[]");
-//     assert_eq!(<Vec<[u8; 20]> as SolEncode>::SOL_NAME, "address[]");
-//     assert_eq!(<Vec<[u8; 32]> as SolEncode>::SOL_NAME, "bytes32[]");
-// }
+#[test]
+fn vec_sol_name_for_primitive_types() {
+    assert_eq!(<Vec<u8> as SolEncode>::SOL_NAME, "uint8[]");
+    assert_eq!(<Vec<u16> as SolEncode>::SOL_NAME, "uint16[]");
+    assert_eq!(<Vec<u32> as SolEncode>::SOL_NAME, "uint32[]");
+    assert_eq!(<Vec<u64> as SolEncode>::SOL_NAME, "uint64[]");
+    assert_eq!(<Vec<u128> as SolEncode>::SOL_NAME, "uint128[]");
+    assert_eq!(<Vec<U256> as SolEncode>::SOL_NAME, "uint256[]");
+    assert_eq!(<Vec<i8> as SolEncode>::SOL_NAME, "int8[]");
+    assert_eq!(<Vec<i16> as SolEncode>::SOL_NAME, "int16[]");
+    assert_eq!(<Vec<i32> as SolEncode>::SOL_NAME, "int32[]");
+    assert_eq!(<Vec<i64> as SolEncode>::SOL_NAME, "int64[]");
+    assert_eq!(<Vec<i128> as SolEncode>::SOL_NAME, "int128[]");
+    assert_eq!(<Vec<bool> as SolEncode>::SOL_NAME, "bool[]");
+    assert_eq!(<Vec<[u8; 20]> as SolEncode>::SOL_NAME, "address[]");
+    assert_eq!(<Vec<[u8; 32]> as SolEncode>::SOL_NAME, "bytes32[]");
+}
 
-// #[test]
-// fn vec_sol_name_for_custom_struct() {
-//     #[derive(Clone, Debug, PartialEq, Eq, SolType)]
-//     struct Point {
-//         x: u64,
-//         y: u64,
-//     }
+#[test]
+fn vec_sol_name_for_custom_struct() {
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct Point {
+        x: u64,
+        y: u64,
+    }
 
-//     assert_eq!(<Vec<Point> as SolEncode>::SOL_NAME, "(uint64,uint64)[]");
-// }
+    assert_eq!(<Vec<Point> as SolEncode>::SOL_NAME, "(uint64,uint64)[]");
+}
 
-// #[test]
-// fn vec_sol_name_for_string() {
-//     assert_eq!(
-//         <Vec<alloc::string::String> as SolEncode>::SOL_NAME,
-//         "string[]"
-//     );
-// }
+#[test]
+fn vec_sol_name_for_string() {
+    assert_eq!(
+        <Vec<alloc::string::String> as SolEncode>::SOL_NAME,
+        "string[]"
+    );
+}
 
 // ========================================================================
 // Signed integer boundary value tests

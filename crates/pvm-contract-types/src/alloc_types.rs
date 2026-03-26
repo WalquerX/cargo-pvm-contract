@@ -60,7 +60,13 @@ impl SolDecode for alloc::string::String {
 
 impl<T: SolEncode> SolEncode for alloc::vec::Vec<T> {
     const IS_DYNAMIC: bool = true;
-    const SOL_NAME: &'static str = "dynamic[]";
+    const SOL_NAME: &'static str = {
+        struct H<T>(core::marker::PhantomData<T>);
+        impl<T: SolEncode> H<T> {
+            const V: crate::ConstStr = crate::ConstStr::new(T::SOL_NAME, "[]");
+        }
+        H::<T>::V.as_str()
+    };
 
     fn encode_len(&self) -> usize {
         32 + self.tail_len()
