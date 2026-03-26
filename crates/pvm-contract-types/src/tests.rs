@@ -519,7 +519,7 @@ fn encode_decode_many_field_static_struct() {
         d: u64,
         e: u128,
         f: bool,
-       // g: Address,
+        // g: Address,
     }
 
     proptest!(|(a: u8, b: u16, c: u32, d: u64, e: u128, f: bool, g: [u8; 20])| {
