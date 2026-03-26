@@ -826,7 +826,7 @@ fn sol_type_name_primitives() {
 fn sol_type_name_dynamic_types() {
     assert_eq!(<&str as SolEncode>::SOL_NAME, "string");
     assert_eq!(<alloc::string::String as SolEncode>::SOL_NAME, "string");
-    // assert_eq!(<Vec<Address> as SolEncode>::SOL_NAME, "address[]");
+    assert_eq!(<Vec<Address> as SolEncode>::SOL_NAME, "address[]");
 }
 
 // ========================================================================
