@@ -132,12 +132,13 @@ fn expand_dynamic_sol_type(
     })
 }
 
-fn build_is_dynamic_expr(fields: &Fields, field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStream {
+fn build_is_dynamic_expr(
+    fields: &Fields,
+    field_info: &[(Option<syn::Ident>, SolType)],
+) -> TokenStream {
     let has_custom = field_info.iter().any(|(_, t)| t.has_custom_types());
     if !has_custom {
-        let is_dynamic = field_info
-            .iter()
-            .any(|(_, t)| t.is_dynamic() == Some(true));
+        let is_dynamic = field_info.iter().any(|(_, t)| t.is_dynamic() == Some(true));
         return quote! { #is_dynamic };
     }
 
@@ -214,7 +215,8 @@ pub(crate) fn sol_type_head_size_expr(ty: &SolType) -> TokenStream {
             quote! { (0 #(+ #parts)*) }
         }
         _ => {
-            let size = ty.head_size()
+            let size = ty
+                .head_size()
                 .expect("sol_type_head_size_expr called on unresolved custom type");
             quote! { #size }
         }
@@ -249,8 +251,10 @@ fn build_total_size_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenS
     if !has_custom {
         let total: usize = field_info
             .iter()
-            .map(|(_, t)| t.head_size()
-                .expect("build_total_size_expr called on unresolved custom type"))
+            .map(|(_, t)| {
+                t.head_size()
+                    .expect("build_total_size_expr called on unresolved custom type")
+            })
             .sum();
         return quote! { #total };
     }
@@ -493,7 +497,8 @@ fn build_dynamic_head_sum_expr(
             } else if t.is_dynamic() == Some(true) {
                 quote! { 32usize }
             } else {
-                let size = t.head_size()
+                let size = t
+                    .head_size()
                     .expect("build_dynamic_head_sum_expr called on unresolved custom type");
                 quote! { #size }
             }
@@ -681,7 +686,8 @@ fn generate_static_encode_body(
 
         let encode_stmt = generate_field_encode(sol_type, &field_access, offset);
         encode_stmts.push(encode_stmt);
-        offset += sol_type.head_size()
+        offset += sol_type
+            .head_size()
             .expect("generate_static_encode_body called on unresolved custom type");
     }
 
@@ -757,7 +763,8 @@ fn generate_dynamic_decode_body(
                 .map(|(i, (field, (field_name, sol_type)))| {
                     let name = field_name.as_ref().unwrap();
                     let ty = &field.ty;
-                    let head_offset_expr = build_dynamic_field_offset_expr(field_info, &field_types, i);
+                    let head_offset_expr =
+                        build_dynamic_field_offset_expr(field_info, &field_types, i);
                     let decode = generate_dynamic_field_decode(ty, sol_type, &head_offset_expr);
                     quote! {
                         #name: #decode
@@ -777,7 +784,8 @@ fn generate_dynamic_decode_body(
                 .enumerate()
                 .map(|(i, (field, (_, sol_type)))| {
                     let ty = &field.ty;
-                    let head_offset_expr = build_dynamic_field_offset_expr(field_info, &field_types, i);
+                    let head_offset_expr =
+                        build_dynamic_field_offset_expr(field_info, &field_types, i);
                     generate_dynamic_field_decode(ty, sol_type, &head_offset_expr)
                 })
                 .collect();
@@ -919,7 +927,8 @@ fn generate_field_encode(
             }
         }
         SolType::FixedArray(inner, size) => {
-            let elem_size = inner.head_size()
+            let elem_size = inner
+                .head_size()
                 .expect("generate_field_encode fixed array requires known static inner size");
             let encode_stmts: Vec<_> = (0..*size)
                 .map(|i| {
@@ -942,7 +951,8 @@ fn generate_field_encode(
                     let idx = syn::Index::from(i);
                     let elem_expr = quote! { #value_expr.#idx };
                     let stmt = generate_field_encode(t, &elem_expr, current_offset);
-                    current_offset += t.head_size()
+                    current_offset += t
+                        .head_size()
                         .expect("generate_field_encode tuple requires known static element size");
                     stmt
                 })
@@ -1130,9 +1140,18 @@ mod tests {
         };
 
         let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(expanded.contains("const IS_DYNAMIC : bool = false ||"), "got: {expanded}");
-        assert!(expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"), "got: {expanded}");
-        assert!(!expanded.contains("const IS_DYNAMIC : bool = true ;"), "got: {expanded}");
+        assert!(
+            expanded.contains("const IS_DYNAMIC : bool = false ||"),
+            "got: {expanded}"
+        );
+        assert!(
+            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"),
+            "got: {expanded}"
+        );
+        assert!(
+            !expanded.contains("const IS_DYNAMIC : bool = true ;"),
+            "got: {expanded}"
+        );
     }
 
     #[test]
@@ -1145,7 +1164,10 @@ mod tests {
         };
 
         let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"), "got: {expanded}");
+        assert!(
+            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"),
+            "got: {expanded}"
+        );
         assert!(expanded.contains("|| true"), "got: {expanded}");
     }
 
@@ -1159,7 +1181,13 @@ mod tests {
         };
 
         let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(expanded.contains("const HEAD_SIZE : usize ="), "got: {expanded}");
-        assert!(expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: HEAD_SIZE"), "got: {expanded}");
+        assert!(
+            expanded.contains("const HEAD_SIZE : usize ="),
+            "got: {expanded}"
+        );
+        assert!(
+            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: HEAD_SIZE"),
+            "got: {expanded}"
+        );
     }
 }

@@ -182,9 +182,7 @@ pub fn generate_dispatch_arm(
 }
 
 fn has_dynamic_outputs(outputs: &[SolType]) -> bool {
-    outputs
-        .iter()
-    .any(|t| t.is_dynamic() == Some(true))
+    outputs.iter().any(|t| t.is_dynamic() == Some(true))
 }
 
 fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStream {
