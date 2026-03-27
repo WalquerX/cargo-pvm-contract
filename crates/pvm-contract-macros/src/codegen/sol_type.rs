@@ -95,9 +95,9 @@ fn expand_dynamic_sol_type(
     field_info: &[(Option<syn::Ident>, SolType)],
 ) -> syn::Result<TokenStream> {
     let sol_name_expr = build_sol_name_expr(field_info);
-    let head_size: usize = field_info.len() * 32;
-    let encode_len_body = generate_dynamic_encode_len(fields, field_info, head_size);
-    let encode_body = generate_dynamic_encode_body(fields, field_info, head_size);
+    let head_size_expr = build_dynamic_head_size_expr(field_info);
+    let encode_len_body = generate_dynamic_encode_len(fields, field_info, &head_size_expr);
+    let encode_body = generate_dynamic_encode_body(fields, field_info, &head_size_expr);
     let decode_body = generate_dynamic_decode_body(fields, field_info);
 
     Ok(quote! {
@@ -398,10 +398,62 @@ fn generate_decode_expr_runtime(sol_type: &SolType, field_ty: &Type) -> TokenStr
     }
 }
 
+/// Compute the total head size expression for a dynamic struct.
+/// Each static field contributes its head_size; each dynamic field contributes 32 (offset slot).
+fn build_dynamic_head_size_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStream {
+    let has_custom = field_info.iter().any(|(_, t)| t.has_custom_types());
+    if !has_custom {
+        let total: usize = field_info
+            .iter()
+            .map(|(_, t)| if t.is_dynamic() { 32 } else { t.head_size() })
+            .sum();
+        quote! { #total }
+    } else {
+        let parts: Vec<TokenStream> = field_info
+            .iter()
+            .map(|(_, t)| {
+                if t.is_dynamic() {
+                    quote! { 32usize }
+                } else {
+                    sol_type_head_size_expr(t)
+                }
+            })
+            .collect();
+        quote! { 0 #(+ #parts)* }
+    }
+}
+
+/// Compute the head offset expression for field at position `idx` in a dynamic struct.
+fn build_dynamic_field_offset_expr(
+    field_info: &[(Option<syn::Ident>, SolType)],
+    idx: usize,
+) -> TokenStream {
+    let has_custom = field_info[..idx].iter().any(|(_, t)| t.has_custom_types());
+    if !has_custom {
+        let offset: usize = field_info[..idx]
+            .iter()
+            .map(|(_, t)| if t.is_dynamic() { 32 } else { t.head_size() })
+            .sum();
+        quote! { #offset }
+    } else {
+        let parts: Vec<TokenStream> = field_info[..idx]
+            .iter()
+            .map(|(_, t)| {
+                if t.is_dynamic() {
+                    quote! { 32usize }
+                } else {
+                    sol_type_head_size_expr(t)
+                }
+            })
+            .collect();
+        quote! { (0 #(+ #parts)*) }
+    }
+}
+
 fn generate_dynamic_encode_len(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
-    head_size: usize,
+    head_size_expr: &TokenStream,
 ) -> TokenStream {
     let tail_lens: Vec<TokenStream> = field_info
         .iter()
@@ -428,15 +480,16 @@ fn generate_dynamic_encode_len(
         .collect();
 
     quote! {
-        #head_size #(+ #tail_lens)*
+        #head_size_expr #(+ #tail_lens)*
     }
 }
 
 fn generate_dynamic_encode_body(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
-    head_size: usize,
+    head_size_expr: &TokenStream,
 ) -> TokenStream {
+    let has_custom = field_info.iter().any(|(_, t)| t.has_custom_types());
     let mut stmts = Vec::new();
 
     for (i, (field_name, sol_type)) in field_info.iter().enumerate() {
@@ -452,24 +505,40 @@ fn generate_dynamic_encode_body(
             Fields::Unit => continue,
         };
 
-        let head_offset = i * 32;
+        let head_offset_expr = build_dynamic_field_offset_expr(field_info, i);
 
         if sol_type.is_dynamic() {
             stmts.push(quote! {
-                buf[#head_offset..#head_offset + 24].fill(0);
-                buf[#head_offset + 24..#head_offset + 32].copy_from_slice(&(__tail_offset as u64).to_be_bytes());
-                let __tail_len = ::pvm_contract_types::SolEncode::tail_len(&#field_access);
-                ::pvm_contract_types::SolEncode::encode_tail_to(&#field_access, &mut buf[__tail_offset..__tail_offset + __tail_len]);
-                __tail_offset += __tail_len;
+                {
+                    let __ho = #head_offset_expr;
+                    buf[__ho..__ho + 24].fill(0);
+                    buf[__ho + 24..__ho + 32].copy_from_slice(&(__tail_offset as u64).to_be_bytes());
+                    let __tail_len = ::pvm_contract_types::SolEncode::tail_len(&#field_access);
+                    ::pvm_contract_types::SolEncode::encode_tail_to(&#field_access, &mut buf[__tail_offset..__tail_offset + __tail_len]);
+                    __tail_offset += __tail_len;
+                }
+            });
+        } else if has_custom {
+            // Use trait-based encode_to for fields when custom types are involved,
+            // since we can't compute offsets at macro time.
+            stmts.push(quote! {
+                {
+                    let __ho = #head_offset_expr;
+                    ::pvm_contract_types::SolEncode::encode_to(&#field_access, &mut buf[__ho..]);
+                }
             });
         } else {
+            let head_offset: usize = field_info[..i]
+                .iter()
+                .map(|(_, t)| if t.is_dynamic() { 32 } else { t.head_size() })
+                .sum();
             let encode_stmt = generate_field_encode(sol_type, &field_access, head_offset);
             stmts.push(encode_stmt);
         }
     }
 
     quote! {
-        let mut __tail_offset: usize = #head_size;
+        let mut __tail_offset: usize = #head_size_expr;
         #(#stmts)*
     }
 }
@@ -603,8 +672,8 @@ fn generate_dynamic_decode_body(
                 .map(|(i, (field, (field_name, sol_type)))| {
                     let name = field_name.as_ref().unwrap();
                     let ty = &field.ty;
-                    let head_offset = i * 32;
-                    let decode = generate_dynamic_field_decode(ty, sol_type, head_offset);
+                    let head_offset_expr = build_dynamic_field_offset_expr(field_info, i);
+                    let decode = generate_dynamic_field_decode(ty, sol_type, &head_offset_expr);
                     quote! {
                         #name: #decode
                     }
@@ -623,8 +692,8 @@ fn generate_dynamic_decode_body(
                 .enumerate()
                 .map(|(i, (field, (_, sol_type)))| {
                     let ty = &field.ty;
-                    let head_offset = i * 32;
-                    generate_dynamic_field_decode(ty, sol_type, head_offset)
+                    let head_offset_expr = build_dynamic_field_offset_expr(field_info, i);
+                    generate_dynamic_field_decode(ty, sol_type, &head_offset_expr)
                 })
                 .collect();
 
@@ -636,20 +705,24 @@ fn generate_dynamic_decode_body(
     }
 }
 
-fn generate_dynamic_field_decode(ty: &Type, sol_type: &SolType, head_offset: usize) -> TokenStream {
+fn generate_dynamic_field_decode(
+    ty: &Type,
+    sol_type: &SolType,
+    head_offset_expr: &TokenStream,
+) -> TokenStream {
     if sol_type.is_dynamic() {
-        let rel_offset_start = head_offset + 24;
-        let rel_offset_end = head_offset + 32;
         quote! {{
+            let __ho = #head_offset_expr;
             let __field_offset =
-                u64::from_be_bytes(input[offset + #rel_offset_start..offset + #rel_offset_end].try_into().unwrap())
+                u64::from_be_bytes(input[offset + __ho + 24..offset + __ho + 32].try_into().unwrap())
                     as usize;
             <#ty as ::pvm_contract_types::SolDecode>::decode_tail(input, offset + __field_offset)
         }}
     } else {
-        quote! {
-            <#ty as ::pvm_contract_types::SolDecode>::decode_at(input, offset + #head_offset)
-        }
+        quote! {{
+            let __ho = #head_offset_expr;
+            <#ty as ::pvm_contract_types::SolDecode>::decode_at(input, offset + __ho)
+        }}
     }
 }
 
@@ -662,7 +735,7 @@ fn generate_field_encode(
         SolType::Address => {
             quote! {
                 buf[#offset..#offset + 12].fill(0);
-                buf[#offset + 12..#offset + 32].copy_from_slice(&#value_expr);
+                buf[#offset + 12..#offset + 32].copy_from_slice(AsRef::<[u8]>::as_ref(&#value_expr));
             }
         }
         SolType::Bool => {

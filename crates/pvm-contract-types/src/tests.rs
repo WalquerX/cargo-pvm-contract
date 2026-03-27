@@ -429,10 +429,7 @@ fn encode_decode_triple_nested_struct() {
 // Dynamic struct with custom static field — the NamedPoint pattern
 // ========================================================================
 
-// BUG: dynamic struct codegen computes head_size = field_count * 32, which is
-// wrong when a static custom field occupies more than 32 bytes (Point needs 64).
 #[test]
-#[ignore = "codegen bug: dynamic struct head_size wrong for custom fields > 32 bytes"]
 fn encode_decode_dynamic_struct_with_custom_field_proptest() {
     #[derive(Clone, Debug, PartialEq, Eq, SolType)]
     struct Point {
@@ -519,21 +516,20 @@ fn encode_decode_many_field_static_struct() {
         d: u64,
         e: u128,
         f: bool,
-        // g: Address,
+        g: Address,
     }
 
     proptest!(|(a: u8, b: u16, c: u32, d: u64, e: u128, f: bool, g: [u8; 20])| {
         let val = Wide {
             a, b, c, d, e, f,
-          //  g: Address(g),
+          g: Address(g),
         };
         // alloy uses AlloyAddress (not our Address), so we just verify roundtrip
         let mut buf = vec![0u8; val.encode_len()];
         val.encode_to(&mut buf);
         prop_assert_eq!(Wide::decode(&buf), val);
         // Cross-validate field count: 7 fields × 32 bytes each = 224
-        // prop_assert_eq!(buf.len(), 7 * 32);
-        prop_assert_eq!(buf.len(), 6 * 32);
+        prop_assert_eq!(buf.len(), 7 * 32);
     });
 }
 
