@@ -199,18 +199,16 @@ pub fn url_to_string(url: &url::Url) -> String {
 pub struct AccountIdMapper;
 
 impl AccountIdMapper {
-    pub fn to_address(account_id: &[u8]) -> H160 {
-        let mut account_bytes: [u8; 32] = [0u8; 32];
-        account_bytes.copy_from_slice(&account_id[..32]);
+    pub fn to_address(account_id: &[u8; 32]) -> H160 {
         if Self::is_eth_derived(account_id) {
-            H160::from_slice(&account_bytes[..20])
+            H160::from_slice(&account_id[..20])
         } else {
-            let account_hash = keccak_256(account_bytes.as_ref());
+            let account_hash = keccak_256(account_id);
             H160::from_slice(&account_hash[12..])
         }
     }
 
-    fn is_eth_derived(account_bytes: &[u8]) -> bool {
+    fn is_eth_derived(account_bytes: &[u8; 32]) -> bool {
         account_bytes[20..] == [0xEE; 12]
     }
 }

@@ -439,7 +439,7 @@ The following flags are shared across all on-chain commands (`upload`, `instanti
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--url <WS_URL>` | `ws://localhost:9944` | Websocket URL of the Substrate node to connect to |
-| `--suri <URI>` | `//Alice` | Secret key URI for signing transactions (e.g. `//Alice`, `//Bob`, or a mnemonic) |
+| `--suri <URI>` | `//Alice` | Secret key URI for signing transactions (currently supports dev accounts: `//Alice`, `//Bob`, `//Charlie`, `//Dave`, `//Eve`, `//Ferdie`) |
 | `--storage-deposit-limit <u128>` | — | Maximum storage deposit to allow (in planck). Prevents unexpectedly large deposits |
 
 ---

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use ruint::aliases::U256;
 use serde_json::Value;
 use std::path::Path;
 use tiny_keccak::{Hasher, Keccak};
@@ -67,27 +68,30 @@ fn find_constructor(abi: &[Value]) -> Result<&Value> {
         .ok_or_else(|| anyhow!("Constructor not found in ABI"))
 }
 
-/// Encode a u256 value (from decimal string) into 32-byte big-endian.
+/// Encode a uint256 value (from decimal or hex string) into 32-byte big-endian.
 fn encode_uint256(value: &str) -> Result<Vec<u8>> {
-    // Handle hex values
-    if value.starts_with("0x") || value.starts_with("0X") {
-        let hex_str = &value[2..];
-        let bytes = hex::decode(hex_str).with_context(|| format!("Invalid hex value: {value}"))?;
-        let mut padded = vec![0u8; 32];
-        if bytes.len() > 32 {
-            anyhow::bail!("Hex value too large for uint256: {value}");
-        }
-        padded[32 - bytes.len()..].copy_from_slice(&bytes);
-        return Ok(padded);
-    }
-
-    // Parse decimal
-    let n: u128 = value
+    let n: U256 = value
         .parse()
-        .with_context(|| format!("Failed to parse '{value}' as uint"))?;
-    let mut buf = vec![0u8; 32];
-    buf[16..].copy_from_slice(&n.to_be_bytes());
-    Ok(buf)
+        .map_err(|_| anyhow!("Failed to parse '{value}' as uint256"))?;
+    Ok(n.to_be_bytes::<32>().to_vec())
+}
+
+/// Decode a 32-byte big-endian word as an unsigned decimal string.
+fn u256_be_to_decimal(bytes: &[u8]) -> String {
+    U256::from_be_slice(bytes).to_string()
+}
+
+/// Decode a 32-byte big-endian word as a signed (two's complement) decimal string.
+fn i256_be_to_decimal(bytes: &[u8]) -> String {
+    let n = U256::from_be_slice(bytes);
+    let sign_bit = U256::from(1) << 255;
+    if n < sign_bit {
+        n.to_string()
+    } else {
+        // Negative: compute -(2^256 - n)
+        let abs = (!n).wrapping_add(U256::from(1));
+        format!("-{abs}")
+    }
 }
 
 /// Encode a bool value into 32 bytes.
@@ -131,15 +135,71 @@ fn encode_bytes(value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     Ok((head, tail))
 }
 
+/// Encode a Solidity `string` value from raw UTF-8 into ABI dynamic encoding.
+fn encode_string(value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+    let bytes = value.as_bytes();
+    let len = bytes.len();
+    let head = vec![0u8; 32]; // offset placeholder
+    let mut tail = vec![0u8; 32]; // length
+    tail[24..].copy_from_slice(&(len as u64).to_be_bytes());
+    tail.extend_from_slice(bytes);
+    // Pad to 32-byte boundary
+    let padding = (32 - (len % 32)) % 32;
+    tail.extend(vec![0u8; padding]);
+    Ok((head, tail))
+}
+
+/// Encode a dynamic array value (e.g. `[1,2,3]`) into ABI dynamic encoding.
+fn encode_array(inner_type: &str, value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+    let trimmed = value.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .ok_or_else(|| anyhow!("Array value must be wrapped in brackets: {value}"))?;
+
+    let elements: Vec<&str> = if inner.trim().is_empty() {
+        vec![]
+    } else {
+        inner.split(',').map(|s| s.trim()).collect()
+    };
+
+    let head = vec![0u8; 32]; // offset placeholder
+
+    // length word
+    let mut tail = vec![0u8; 32];
+    tail[24..].copy_from_slice(&(elements.len() as u64).to_be_bytes());
+
+    // Encode each element (only static inner types supported for now)
+    for elem in &elements {
+        let encoded = encode_param(inner_type, elem)?;
+        match encoded {
+            EncodedParam::Static(data) => tail.extend_from_slice(&data),
+            EncodedParam::Dynamic { .. } => {
+                anyhow::bail!("Arrays of dynamic types not yet supported");
+            }
+        }
+    }
+
+    Ok((head, tail))
+}
+
 /// Encode a single ABI argument based on its Solidity type.
 fn encode_param(sol_type: &str, value: &str) -> Result<EncodedParam> {
-    if sol_type == "address" {
+    // Check dynamic array first (e.g. "uint256[]") before prefix matches
+    if sol_type.ends_with("[]") {
+        let inner_type = &sol_type[..sol_type.len() - 2];
+        let (head, tail) = encode_array(inner_type, value)?;
+        Ok(EncodedParam::Dynamic { _head: head, tail })
+    } else if sol_type == "address" {
         Ok(EncodedParam::Static(encode_address(value)?))
     } else if sol_type == "bool" {
         Ok(EncodedParam::Static(encode_bool(value)?))
     } else if sol_type.starts_with("uint") || sol_type.starts_with("int") {
         Ok(EncodedParam::Static(encode_uint256(value)?))
-    } else if sol_type == "bytes" || sol_type == "string" {
+    } else if sol_type == "string" {
+        let (head, tail) = encode_string(value)?;
+        Ok(EncodedParam::Dynamic { _head: head, tail })
+    } else if sol_type == "bytes" {
         let (head, tail) = encode_bytes(value)?;
         Ok(EncodedParam::Dynamic { _head: head, tail })
     } else if sol_type.starts_with("bytes") {
@@ -332,32 +392,65 @@ fn decode_params(inputs: &[Value], data: &[u8]) -> Result<Vec<DecodedParam>> {
     Ok(results)
 }
 
-fn decode_word(sol_type: &str, word: &[u8], _full_data: &[u8]) -> Result<String> {
-    if sol_type == "address" {
+fn decode_word(sol_type: &str, word: &[u8], full_data: &[u8]) -> Result<String> {
+    // Check dynamic array first (e.g. "uint256[]") before prefix matches
+    if sol_type.ends_with("[]") {
+        let inner_type = &sol_type[..sol_type.len() - 2];
+        let mut offset_bytes = [0u8; 8];
+        offset_bytes.copy_from_slice(&word[24..]);
+        let offset = u64::from_be_bytes(offset_bytes) as usize;
+        if offset + 32 > full_data.len() {
+            anyhow::bail!("Array offset out of bounds for '{sol_type}'");
+        }
+        let mut len_bytes = [0u8; 8];
+        len_bytes.copy_from_slice(&full_data[offset + 24..offset + 32]);
+        let count = u64::from_be_bytes(len_bytes) as usize;
+        let data_start = offset + 32;
+        let mut items = Vec::new();
+        for i in 0..count {
+            let elem_offset = data_start + i * 32;
+            if elem_offset + 32 > full_data.len() {
+                anyhow::bail!("Array element {i} out of bounds for '{sol_type}'");
+            }
+            let elem_word = &full_data[elem_offset..elem_offset + 32];
+            items.push(decode_word(inner_type, elem_word, full_data)?);
+        }
+        Ok(format!("[{}]", items.join(",")))
+    } else if sol_type == "address" {
         Ok(format!("0x{}", hex::encode(&word[12..])))
     } else if sol_type == "bool" {
         Ok(if word[31] != 0 { "true" } else { "false" }.to_string())
     } else if sol_type.starts_with("uint") {
-        // Decode as u128 (sufficient for most cases)
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&word[16..]);
-        let n = u128::from_be_bytes(bytes);
-        Ok(n.to_string())
+        Ok(u256_be_to_decimal(word))
     } else if sol_type.starts_with("int") {
-        let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&word[16..]);
-        let n = i128::from_be_bytes(bytes);
-        Ok(n.to_string())
+        Ok(i256_be_to_decimal(word))
     } else if sol_type.starts_with("bytes") && sol_type != "bytes" {
         // Fixed-size bytesN
         let size: usize = sol_type[5..].parse().unwrap_or(32);
         Ok(format!("0x{}", hex::encode(&word[..size])))
-    } else {
-        // For dynamic types, show the offset
+    } else if sol_type == "string" || sol_type == "bytes" {
+        // Dynamic type: word contains the offset into full_data
         let mut offset_bytes = [0u8; 8];
         offset_bytes.copy_from_slice(&word[24..]);
         let offset = u64::from_be_bytes(offset_bytes) as usize;
-        Ok(format!("(dynamic@offset:{offset})"))
+        if offset + 32 > full_data.len() {
+            anyhow::bail!("Dynamic data offset out of bounds for '{sol_type}'");
+        }
+        let mut len_bytes = [0u8; 8];
+        len_bytes.copy_from_slice(&full_data[offset + 24..offset + 32]);
+        let len = u64::from_be_bytes(len_bytes) as usize;
+        let data_start = offset + 32;
+        if data_start + len > full_data.len() {
+            anyhow::bail!("Dynamic data length out of bounds for '{sol_type}'");
+        }
+        let raw = &full_data[data_start..data_start + len];
+        if sol_type == "string" {
+            Ok(String::from_utf8_lossy(raw).to_string())
+        } else {
+            Ok(format!("0x{}", hex::encode(raw)))
+        }
+    } else {
+        anyhow::bail!("Unsupported ABI type for decoding: {sol_type}");
     }
 }
 
@@ -429,6 +522,27 @@ mod tests {
     }
 
     #[test]
+    fn encode_uint256_larger_than_u128() {
+        // 2^128 = 340282366920938463463374607431768211456
+        let encoded = encode_uint256("340282366920938463463374607431768211456").unwrap();
+        assert_eq!(encoded.len(), 32);
+        // 2^128 in big-endian: byte 15 = 0x01, rest zero
+        assert_eq!(encoded[15], 1);
+        assert!(encoded[..15].iter().all(|&b| b == 0));
+        assert!(encoded[16..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn decode_uint256_larger_than_u128() {
+        let mut word = [0u8; 32];
+        word[15] = 1; // 2^128
+        assert_eq!(
+            u256_be_to_decimal(&word),
+            "340282366920938463463374607431768211456"
+        );
+    }
+
+    #[test]
     fn encode_bool_true() {
         let encoded = encode_bool("true").unwrap();
         assert_eq!(encoded[31], 1);
@@ -480,6 +594,68 @@ mod tests {
         assert_eq!(&tail[32..36], &[0xde, 0xad, 0xbe, 0xef]);
         // rest is zero-padded
         assert!(tail[36..].iter().all(|&b| b == 0));
+    }
+
+    // -- encode_string tests --
+
+    #[test]
+    fn encode_string_utf8() {
+        let (_head, tail) = encode_string("hello").unwrap();
+        // tail = 32-byte length + data padded to 32 bytes
+        assert_eq!(tail.len(), 64); // 32 (length) + 32 (5 bytes padded)
+        // length word: 5
+        assert_eq!(tail[31], 5);
+        // data is raw UTF-8, not hex-decoded
+        assert_eq!(&tail[32..37], b"hello");
+        // rest is zero-padded
+        assert!(tail[37..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn encode_param_string_uses_utf8_not_hex() {
+        // "string" type should encode the raw UTF-8 value, not hex-decode it
+        let result = encode_param("string", "hello world").unwrap();
+        match result {
+            EncodedParam::Dynamic { tail, .. } => {
+                // length = 11 bytes ("hello world")
+                assert_eq!(tail[31], 11);
+                assert_eq!(&tail[32..43], b"hello world");
+            }
+            EncodedParam::Static(_) => panic!("Expected dynamic encoding for string"),
+        }
+    }
+
+    #[test]
+    fn encode_param_bytes_still_uses_hex() {
+        // "bytes" type should still hex-decode the input
+        let result = encode_param("bytes", "0xdeadbeef").unwrap();
+        match result {
+            EncodedParam::Dynamic { tail, .. } => {
+                assert_eq!(tail[31], 4); // length = 4 decoded bytes
+                assert_eq!(&tail[32..36], &[0xde, 0xad, 0xbe, 0xef]);
+            }
+            EncodedParam::Static(_) => panic!("Expected dynamic encoding for bytes"),
+        }
+    }
+
+    // -- encode_array tests --
+
+    #[test]
+    fn encode_array_uint256() {
+        let (_head, tail) = encode_array("uint256", "[1,2,3]").unwrap();
+        // tail = 32-byte length(3) + 3 x 32-byte elements
+        assert_eq!(tail.len(), 32 + 3 * 32);
+        assert_eq!(tail[31], 3); // length = 3
+        assert_eq!(tail[32 + 31], 1); // first element
+        assert_eq!(tail[64 + 31], 2); // second element
+        assert_eq!(tail[96 + 31], 3); // third element
+    }
+
+    #[test]
+    fn encode_array_empty() {
+        let (_head, tail) = encode_array("uint256", "[]").unwrap();
+        assert_eq!(tail.len(), 32); // just the length word
+        assert_eq!(tail[31], 0); // length = 0
     }
 
     // -- encode_param tests --
@@ -666,6 +842,104 @@ mod tests {
         word[2] = 0xbe;
         word[3] = 0xef;
         assert_eq!(decode_word("bytes4", &word, &[]).unwrap(), "0xdeadbeef");
+    }
+
+    // -- string/bytes ABI roundtrip --
+
+    #[test]
+    fn encode_decode_call_with_string_param() {
+        let abi = r#"[{
+            "type": "function",
+            "name": "setName",
+            "inputs": [
+                {"name": "owner", "type": "address"},
+                {"name": "name", "type": "string"}
+            ],
+            "outputs": []
+        }]"#;
+        let f = write_abi_file(abi);
+        let args = vec![
+            "0x000000000000000000000000000000000000CAFE".to_string(),
+            "hello world".to_string(),
+        ];
+        let calldata = encode_call(f.path(), "setName", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "setName");
+        assert_eq!(params.len(), 2);
+        assert_eq!(
+            params[0].value,
+            "0x000000000000000000000000000000000000cafe"
+        );
+        assert_eq!(params[0].sol_type, "address");
+        assert_eq!(params[1].sol_type, "string");
+        assert_eq!(params[1].value, "hello world");
+    }
+
+    #[test]
+    fn encode_decode_call_with_string_and_uint() {
+        let abi = r#"[{
+            "type": "function",
+            "name": "register",
+            "inputs": [
+                {"name": "label", "type": "string"},
+                {"name": "amount", "type": "uint256"}
+            ],
+            "outputs": []
+        }]"#;
+        let f = write_abi_file(abi);
+        let args = vec!["my-token".to_string(), "42".to_string()];
+        let calldata = encode_call(f.path(), "register", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "register");
+        assert_eq!(params[0].value, "my-token");
+        assert_eq!(params[1].value, "42");
+    }
+
+    // -- array ABI roundtrip --
+
+    #[test]
+    fn encode_decode_call_with_array() {
+        let abi = r#"[{
+            "type": "function",
+            "name": "sumArray",
+            "inputs": [
+                {"name": "arr", "type": "uint256[]"}
+            ],
+            "outputs": [{"name": "", "type": "uint256"}]
+        }]"#;
+        let f = write_abi_file(abi);
+        let args = vec!["[1,2,3]".to_string()];
+        let calldata = encode_call(f.path(), "sumArray", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "sumArray");
+        assert_eq!(params[0].sol_type, "uint256[]");
+        assert_eq!(params[0].value, "[1,2,3]");
+    }
+
+    #[test]
+    fn encode_decode_call_with_empty_array() {
+        let abi = r#"[{
+            "type": "function",
+            "name": "sumArray",
+            "inputs": [
+                {"name": "arr", "type": "uint256[]"}
+            ],
+            "outputs": [{"name": "", "type": "uint256"}]
+        }]"#;
+        let f = write_abi_file(abi);
+        let args = vec!["[]".to_string()];
+        let calldata = encode_call(f.path(), "sumArray", &args).unwrap();
+        let hex_data = format!("0x{}", hex::encode(&calldata));
+
+        let (name, params) = decode_call(f.path(), &hex_data).unwrap();
+        assert_eq!(name, "sumArray");
+        assert_eq!(params[0].value, "[]");
     }
 
     // -- multi-type ABI roundtrip --

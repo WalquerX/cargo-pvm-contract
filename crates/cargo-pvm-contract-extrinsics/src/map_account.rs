@@ -85,7 +85,11 @@ where
         let account_id = self.opts.signer().account_id();
         Ok(MapAccountExecResult {
             events,
-            address: AccountIdMapper::to_address(&account_id.encode()[..]),
+            address: AccountIdMapper::to_address(
+                &account_id.encode()[..]
+                    .try_into()
+                    .expect("AccountId32 is 32 bytes"),
+            ),
         })
     }
 

@@ -302,6 +302,77 @@ async fn account_id_mapper_matches_on_chain_mapping() {
     assert_eq!(local_h160, map_result);
 }
 
+// ---------- dynamic-types contract tests ----------
+
+fn build_dynamic_types() -> (Vec<u8>, std::path::PathBuf) {
+    let c = contract("test-contracts");
+    c.build();
+    let bytecode =
+        std::fs::read(c.polkavm_binary("dynamic-types", "release")).expect("read polkavm binary");
+    let abi_path = c.abi_json_path("dynamic-types", "release");
+    (bytecode, abi_path)
+}
+
+#[tokio::test]
+async fn dynamic_types_string_length() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, abi_path) = build_dynamic_types();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode), vec![], &alice)
+        .await
+        .expect("instantiate dynamic-types");
+
+    let data = encode_call(&abi_path, "getStringLength", &["hello world"]);
+    let result = client
+        .call_dry_run(deploy.contract_address, data, &alice)
+        .await
+        .expect("getStringLength");
+    let len = uint256_from_bytes(&result.result.unwrap().data);
+    assert_eq!(len, 11, "string 'hello world' should have length 11");
+}
+
+#[tokio::test]
+async fn dynamic_types_bytes_length() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, abi_path) = build_dynamic_types();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode), vec![], &alice)
+        .await
+        .expect("instantiate dynamic-types");
+
+    let data = encode_call(&abi_path, "getBytesLength", &["0xDEADBEEF"]);
+    let result = client
+        .call_dry_run(deploy.contract_address, data, &alice)
+        .await
+        .expect("getBytesLength");
+    let len = uint256_from_bytes(&result.result.unwrap().data);
+    assert_eq!(len, 4, "bytes 0xDEADBEEF should have length 4");
+}
+
+#[tokio::test]
+async fn dynamic_types_sum_array() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, abi_path) = build_dynamic_types();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode), vec![], &alice)
+        .await
+        .expect("instantiate dynamic-types");
+
+    let data = encode_call(&abi_path, "sumArray", &["[1,2,3]"]);
+    let result = client
+        .call_dry_run(deploy.contract_address, data, &alice)
+        .await
+        .expect("sumArray");
+    let sum = uint256_from_bytes(&result.result.unwrap().data);
+    assert_eq!(sum, 6, "sum of [1,2,3] should be 6");
+}
+
 /// Decode a big-endian uint256 (32 bytes) into a u128.
 fn uint256_from_bytes(data: &[u8]) -> u128 {
     assert!(data.len() >= 32, "uint256 needs at least 32 bytes");

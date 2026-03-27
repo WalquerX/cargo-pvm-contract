@@ -85,12 +85,16 @@ where
     pub async fn done(self) -> Result<InstantiateExec<C, Signer>> {
         let url = self.extrinsic_opts.url();
 
-        let salt = self.salt.clone().map(|s| {
-            assert!(s.len() <= 32, "salt has to be <= 32 bytes");
-            let mut salt = [0u8; 32];
-            salt[..s.len()].copy_from_slice(&s);
-            salt
-        });
+        let salt = self
+            .salt
+            .clone()
+            .map(|s| {
+                anyhow::ensure!(s.len() <= 32, "salt has to be <= 32 bytes, got {}", s.len());
+                let mut salt = [0u8; 32];
+                salt[..s.len()].copy_from_slice(&s);
+                Ok(salt)
+            })
+            .transpose()?;
 
         let rpc_cli = RpcClient::from_url(&url).await?;
         let client = OnlineClient::from_rpc_client(rpc_cli.clone()).await?;

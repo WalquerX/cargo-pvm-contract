@@ -1221,6 +1221,7 @@ dependencies = [
  "log",
  "polkavm-linker",
  "predicates",
+ "ruint",
  "serde",
  "serde_json",
  "sp-core",
