@@ -113,7 +113,7 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
             }
         }
         SolType::Tuple(types) => {
-            if types.iter().all(|t| !t.is_dynamic()) {
+            if types.iter().all(|t| t.is_dynamic() == Some(false)) {
                 let encodes: Vec<_> = types
                     .iter()
                     .enumerate()
@@ -122,7 +122,13 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                         generate_encode(t, quote!(#value_expr.#idx), use_alloc)
                     })
                     .collect();
-                let total_size = types.iter().map(|t| t.head_size()).sum::<usize>();
+                let total_size = types
+                    .iter()
+                    .map(|t| {
+                        t.head_size()
+                            .expect("Tuple static encode called on unresolved custom type")
+                    })
+                    .sum::<usize>();
                 if use_alloc {
                     quote! {{
                         let mut out = alloc::vec::Vec::with_capacity(#total_size);
@@ -152,7 +158,7 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                     let idx = syn::Index::from(i);
                     let elem_expr = quote!(#value_expr.#idx);
 
-                    if t.is_dynamic() {
+                    if t.is_dynamic() == Some(true) {
                         stmts.push(quote! {{
                             let __off = #head_size + __tail.len();
                             let __off_value = ruint::aliases::U256::from(__off);
@@ -165,10 +171,33 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                             ::pvm_contract_types::SolEncode::encode_tail_to(&#elem_expr, &mut __tbuf);
                             __tail.extend_from_slice(&__tbuf);
                         }});
-                    } else {
+                    } else if t.is_dynamic() == Some(false) {
                         let encode = generate_encode(t, elem_expr, use_alloc);
                         stmts.push(quote! {
                             __head.extend_from_slice(&#encode);
+                        });
+                    } else {
+                        stmts.push(quote! {
+                            if ::pvm_contract_types::SolEncode::is_dynamic(&#elem_expr) {
+                                let __off = #head_size + __tail.len();
+                                let __off_value = ruint::aliases::U256::from(__off);
+                                let mut __off_buf = [0u8; 32];
+                                <ruint::aliases::U256 as ::pvm_contract_types::SolEncode>::encode_to(
+                                    &__off_value, &mut __off_buf);
+                                __head.extend_from_slice(&__off_buf);
+                                let __tl = ::pvm_contract_types::SolEncode::tail_len(&#elem_expr);
+                                let mut __tbuf = alloc::vec![0u8; __tl];
+                                ::pvm_contract_types::SolEncode::encode_tail_to(&#elem_expr, &mut __tbuf);
+                                __tail.extend_from_slice(&__tbuf);
+                            } else {
+                                let __hs = ::pvm_contract_types::SolEncode::head_size(&#elem_expr);
+                                let __start = __head.len();
+                                __head.resize(__start + __hs, 0);
+                                ::pvm_contract_types::SolEncode::encode_to(
+                                    &#elem_expr,
+                                    &mut __head[__start..__start + __hs],
+                                );
+                            }
                         });
                     }
                 }

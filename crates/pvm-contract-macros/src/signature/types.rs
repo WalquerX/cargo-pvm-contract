@@ -16,6 +16,53 @@ pub enum SolType {
 }
 
 impl SolType {
+    /// Returns the dynamic/static property only when it can be determined from
+    /// syntax alone. Custom types intentionally return `None` and must be
+    /// resolved through generated trait expressions.
+    pub fn is_dynamic(&self) -> Option<bool> {
+        match self {
+            SolType::DynBytes | SolType::String | SolType::Array(_) => Some(true),
+            SolType::Tuple(types) => {
+                let mut any_dynamic = false;
+                for ty in types {
+                    match ty.is_dynamic() {
+                        Some(true) => any_dynamic = true,
+                        Some(false) => {}
+                        None => return None,
+                    }
+                }
+                Some(any_dynamic)
+            }
+            SolType::FixedArray(inner, _) => inner.is_dynamic(),
+            SolType::Custom(_) => None,
+            _ => Some(false),
+        }
+    }
+
+    /// Returns the ABI head size only when it can be determined from syntax
+    /// alone. Custom types intentionally return `None` and must be resolved
+    /// through generated trait expressions.
+    pub fn head_size(&self) -> Option<usize> {
+        match self {
+            SolType::FixedArray(inner, size) => match inner.is_dynamic()? {
+                true => Some(32),
+                false => Some(inner.head_size()? * size),
+            },
+            SolType::Tuple(types) => match self.is_dynamic()? {
+                true => Some(32),
+                false => {
+                    let mut total = 0usize;
+                    for ty in types {
+                        total += ty.head_size()?;
+                    }
+                    Some(total)
+                }
+            },
+            SolType::Custom(_) => None,
+            _ => Some(32),
+        }
+    }
+
     pub fn canonical_name(&self) -> String {
         match self {
             SolType::Address => "address".to_string(),
@@ -32,27 +79,6 @@ impl SolType {
                 format!("({})", inner.join(","))
             }
             SolType::Custom(name) => name.clone(),
-        }
-    }
-
-    pub fn is_dynamic(&self) -> bool {
-        match self {
-            SolType::DynBytes | SolType::String | SolType::Array(_) => true,
-            SolType::Tuple(types) => types.iter().any(|t| t.is_dynamic()),
-            SolType::FixedArray(inner, _) => inner.is_dynamic(),
-            SolType::Custom(_) => false,
-            _ => false,
-        }
-    }
-
-    pub fn head_size(&self) -> usize {
-        match self {
-            SolType::FixedArray(inner, size) if !inner.is_dynamic() => inner.head_size() * size,
-            SolType::Tuple(types) if !self.is_dynamic() => {
-                types.iter().map(|t| t.head_size()).sum()
-            }
-            SolType::Custom(_) => 32,
-            _ => 32,
         }
     }
 
@@ -166,17 +192,6 @@ mod tests {
             matches!(sol, SolType::Custom(ref name) if name == "Count"),
             "Type alias should become SolType::Custom, got {:?}",
             sol
-        );
-    }
-
-    #[test]
-    fn custom_type_head_size_must_not_be_zero() {
-        let sol = SolType::Custom("Count".to_string());
-        assert_ne!(sol.head_size(), 0, "Custom type head_size must not be 0");
-        assert_eq!(
-            sol.head_size(),
-            32,
-            "Custom type default head_size should be 32 (one ABI word)"
         );
     }
 

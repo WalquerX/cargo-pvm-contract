@@ -89,7 +89,13 @@ fn build_output_size_expr(outputs: &[SolType]) -> TokenStream {
     let has_custom = outputs.iter().any(|t| t.has_custom_types());
 
     if !has_custom {
-        let total: usize = outputs.iter().map(|t| t.head_size()).sum();
+        let total: usize = outputs
+            .iter()
+            .map(|t| {
+                t.head_size()
+                    .expect("build_output_size_expr called on unresolved custom type")
+            })
+            .sum();
         return quote! { #total };
     }
 
@@ -176,7 +182,9 @@ pub fn generate_dispatch_arm(
 }
 
 fn has_dynamic_outputs(outputs: &[SolType]) -> bool {
-    outputs.iter().any(|t| t.is_dynamic())
+    outputs
+        .iter()
+    .any(|t| t.is_dynamic() == Some(true))
 }
 
 fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStream {
@@ -189,7 +197,7 @@ fn generate_encode_and_return(outputs: &[SolType], use_alloc: bool) -> TokenStre
     if has_dynamic && !use_alloc {
         let type_name = outputs
             .iter()
-            .find(|t| t.is_dynamic())
+            .find(|t| t.is_dynamic() == Some(true))
             .map(|t| t.canonical_name())
             .unwrap_or_else(|| "dynamic".to_string());
         let msg = format!(
@@ -287,7 +295,7 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
                 quote!(result.#idx)
             };
 
-            if ty.is_dynamic() {
+            if ty.is_dynamic() == Some(true) {
                 let encode_tail = generate_dynamic_value_encode(ty, value_expr);
                 quote! {
                     let offset = __head_size + tail.len();
@@ -301,11 +309,36 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
                     let encoded = #encode_tail;
                     tail.extend_from_slice(&encoded);
                 }
-            } else {
+            } else if ty.is_dynamic() == Some(false) {
                 let encode = generate_encode(ty, value_expr, true);
                 quote! {
                     let encoded = #encode;
                     head.extend_from_slice(&encoded);
+                }
+            } else {
+                quote! {
+                    if ::pvm_contract_types::SolEncode::is_dynamic(&#value_expr) {
+                        let offset = __head_size + tail.len();
+                        let offset_value = ruint::aliases::U256::from(offset);
+                        let mut offset_buf = [0u8; 32];
+                        <ruint::aliases::U256 as ::pvm_contract_types::SolEncode>::encode_to(
+                            &offset_value,
+                            &mut offset_buf,
+                        );
+                        head.extend_from_slice(&offset_buf);
+                        let __tl = ::pvm_contract_types::SolEncode::tail_len(&#value_expr);
+                        let mut __tbuf = alloc::vec![0u8; __tl];
+                        ::pvm_contract_types::SolEncode::encode_tail_to(&#value_expr, &mut __tbuf);
+                        tail.extend_from_slice(&__tbuf);
+                    } else {
+                        let __hs = ::pvm_contract_types::SolEncode::head_size(&#value_expr);
+                        let __start = head.len();
+                        head.resize(__start + __hs, 0);
+                        ::pvm_contract_types::SolEncode::encode_to(
+                            &#value_expr,
+                            &mut head[__start..__start + __hs],
+                        );
+                    }
                 }
             }
         })

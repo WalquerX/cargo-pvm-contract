@@ -113,7 +113,8 @@ pub fn generate_decode(
             if use_alloc {
                 let inner_decode =
                     generate_decode_array_element(inner, quote!(elem_data), use_alloc);
-                let elem_size = inner.head_size();
+                let elem_size = inner.head_size()
+                    .expect("Array decode called on unresolved custom element type");
                 quote! {{
                     let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
                     let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
@@ -130,7 +131,8 @@ pub fn generate_decode(
             }
         }
         SolType::FixedArray(inner, size) => {
-            let elem_size = inner.head_size();
+            let elem_size = inner.head_size()
+                .expect("FixedArray decode called on unresolved custom element type");
             let elem_decodes: Vec<_> = (0..*size)
                 .map(|i| {
                     let elem_offset = offset + i * elem_size;
@@ -147,7 +149,8 @@ pub fn generate_decode(
                 .iter()
                 .map(|t| {
                     let decode = generate_decode(t, data_expr.clone(), current_offset, use_alloc);
-                    current_offset += t.head_size();
+                    current_offset += t.head_size()
+                        .expect("Tuple decode called on unresolved custom element type");
                     decode
                 })
                 .collect();
@@ -183,7 +186,8 @@ pub fn generate_decode_params(types: &[SolType], use_alloc: bool) -> Vec<TokenSt
             .iter()
             .map(|ty| {
                 let decode = generate_decode(ty, quote!(input), offset, use_alloc);
-                offset += ty.head_size();
+                offset += ty.head_size()
+                    .expect("Param decode called on unresolved custom type");
                 decode
             })
             .collect()
@@ -255,7 +259,13 @@ pub fn calculate_min_input_size(types: &[SolType]) -> TokenStream {
     let has_custom = types.iter().any(|t| t.has_custom_types());
 
     if !has_custom {
-        let total: usize = types.iter().map(|t| t.head_size()).sum();
+        let total: usize = types
+            .iter()
+            .map(|t| {
+                t.head_size()
+                    .expect("calculate_min_input_size called on unresolved custom type")
+            })
+            .sum();
         return quote! { #total };
     }
 
