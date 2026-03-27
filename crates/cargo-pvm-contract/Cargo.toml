@@ -30,7 +30,7 @@ polkavm-linker = { workspace = true }
 convert_case = { workspace = true }
 tiny-keccak = { workspace = true }
 hex = "0.4"
-ruint = { version = "1.17", default-features = false }
+alloy-core = { version = "1.5", features = ["dyn-abi"] }
 cargo-pvm-contract-extrinsics = { path = "../cargo-pvm-contract-extrinsics" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 subxt = "0.44"

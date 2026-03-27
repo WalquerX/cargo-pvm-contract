@@ -373,6 +373,47 @@ async fn dynamic_types_sum_array() {
     assert_eq!(sum, 6, "sum of [1,2,3] should be 6");
 }
 
+// ---------- composite-types contract tests ----------
+
+fn build_composite_types() -> (Vec<u8>, std::path::PathBuf) {
+    let c = contract("test-contracts");
+    c.build();
+    let bytecode =
+        std::fs::read(c.polkavm_binary("composite-types", "release")).expect("read polkavm binary");
+    let abi_path = c.abi_json_path("composite-types", "release");
+    (bytecode, abi_path)
+}
+
+#[tokio::test]
+async fn composite_types_process_tuple() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, abi_path) = build_composite_types();
+
+    let deploy = client
+        .instantiate(Code::Upload(bytecode), vec![], &alice)
+        .await
+        .expect("instantiate composite-types");
+
+    // processTuple((42, true)) should return 42 (returns amount if flag is true)
+    let data = encode_call(&abi_path, "processTuple", &["(42,true)"]);
+    let result = client
+        .call_dry_run(deploy.contract_address, data, &alice)
+        .await
+        .expect("processTuple(42,true)");
+    let val = uint256_from_bytes(&result.result.unwrap().data);
+    assert_eq!(val, 42, "processTuple((42,true)) should return 42");
+
+    // processTuple((42, false)) should return 0 (returns 0 if flag is false)
+    let data = encode_call(&abi_path, "processTuple", &["(42,false)"]);
+    let result = client
+        .call_dry_run(deploy.contract_address, data, &alice)
+        .await
+        .expect("processTuple(42,false)");
+    let val = uint256_from_bytes(&result.result.unwrap().data);
+    assert_eq!(val, 0, "processTuple((42,false)) should return 0");
+}
+
 /// Decode a big-endian uint256 (32 bytes) into a u128.
 fn uint256_from_bytes(data: &[u8]) -> u128 {
     assert!(data.len() >= 32, "uint256 needs at least 32 bytes");
