@@ -43,7 +43,7 @@ fn build_function_signature(func: &Value) -> Result<String> {
         .ok_or_else(|| anyhow!("ABI entry missing 'inputs'"))?;
     let param_types: Vec<String> = inputs
         .iter()
-        .map(|input| canonical_type(input))
+        .map(canonical_type)
         .collect::<Result<Vec<_>>>()?;
     Ok(format!("{}({})", name, param_types.join(",")))
 }
@@ -60,7 +60,7 @@ fn canonical_type(input: &Value) -> Result<String> {
             .ok_or_else(|| anyhow!("Tuple type missing 'components'"))?;
         let inner: Vec<String> = components
             .iter()
-            .map(|c| canonical_type(c))
+            .map(canonical_type)
             .collect::<Result<Vec<_>>>()?;
         Ok(format!("({})", inner.join(",")))
     } else if sol_type == "tuple[]" {
@@ -69,7 +69,7 @@ fn canonical_type(input: &Value) -> Result<String> {
             .ok_or_else(|| anyhow!("Tuple array type missing 'components'"))?;
         let inner: Vec<String> = components
             .iter()
-            .map(|c| canonical_type(c))
+            .map(canonical_type)
             .collect::<Result<Vec<_>>>()?;
         Ok(format!("({})[]", inner.join(",")))
     } else {
@@ -101,8 +101,7 @@ fn abi_to_dyn_sol_type(input: &Value) -> Result<DynSolType> {
         .ok_or_else(|| anyhow!("Input missing 'type'"))?;
 
     // Array types first (e.g. "uint256[]", "tuple[]")
-    if sol_type.ends_with("[]") {
-        let base = &sol_type[..sol_type.len() - 2];
+    if let Some(base) = sol_type.strip_suffix("[]") {
         let mut base_input = serde_json::json!({"type": base});
         if let Some(comps) = input["components"].as_array() {
             base_input["components"] = Value::Array(comps.clone());
