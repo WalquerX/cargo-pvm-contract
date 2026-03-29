@@ -76,7 +76,7 @@ where
 
     /// Uploads contract code to the blockchain via an extrinsic.
     pub async fn upload_code(&self) -> Result<UploadResult<C>, ErrorVariant> {
-        let storage_deposit_limit = self.opts.storage_deposit_limit().unwrap_or(0);
+        let storage_deposit_limit = self.opts.storage_deposit_limit().unwrap_or(u128::MAX);
 
         let call = UploadCode::new(self.code.clone(), storage_deposit_limit).build();
 

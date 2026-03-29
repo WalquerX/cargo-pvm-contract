@@ -256,6 +256,20 @@ async fn fetch_all_contracts_includes_deployed() {
         contracts.contains(&deploy.contract_address),
         "deployed contract should appear in fetch_all_contracts"
     );
+
+    // EOAs (like Alice's mapped address) should not appear
+    let _ = client.map_account(&alice).await;
+    let alice_id = subxt_signer::sr25519::dev::alice().public_key().0;
+    let alice_h160 = cargo_pvm_contract_extrinsics::AccountIdMapper::to_address(&alice_id);
+
+    let contracts = client
+        .fetch_all_contracts()
+        .await
+        .expect("fetch_all_contracts after map");
+    assert!(
+        !contracts.contains(&alice_h160),
+        "EOA should not appear in fetch_all_contracts"
+    );
 }
 
 #[tokio::test]

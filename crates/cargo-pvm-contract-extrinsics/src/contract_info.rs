@@ -299,24 +299,28 @@ fn parse_contract_address(
     Decode::decode(&mut account).map_err(|err| anyhow!("H160 deserialization error: {err}"))
 }
 
-/// Fetch all contract addresses from storage.
+/// Fetch all contract addresses from storage, excluding EOAs.
 pub async fn fetch_all_contracts<C: Config>(
     client: &OnlineClient<C>,
     rpc: &LegacyRpcMethods<C>,
 ) -> Result<Vec<H160>> {
     let best_block = get_best_block(rpc).await?;
+    let storage = client.storage().at(best_block);
     let root_key = subxt::dynamic::storage("Revive", "AccountInfoOf", ()).to_root_bytes();
-    let mut keys = client
-        .storage()
-        .at(best_block)
-        .fetch_raw_keys(root_key.clone())
-        .await?;
+    let mut keys = storage.fetch_raw_keys(root_key.clone()).await?;
 
     let mut contract_accounts = Vec::new();
     while let Some(result) = keys.next().await {
         let key = result?;
-        let contract_account = parse_contract_address(&key, root_key.len())?;
-        contract_accounts.push(contract_account);
+        let addr = parse_contract_address(&key, root_key.len())?;
+        let account_info_address =
+            dynamic("Revive", "AccountInfoOf", vec![Value::from_bytes(addr)]);
+        if let Some(value) = storage.fetch(&account_info_address).await? {
+            let info = value.as_type::<PrAccountInfo<u128>>()?;
+            if matches!(info.account_type, PrAccountType::Contract(_)) {
+                contract_accounts.push(addr);
+            }
+        }
     }
 
     Ok(contract_accounts)

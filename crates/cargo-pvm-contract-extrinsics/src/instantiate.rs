@@ -235,7 +235,7 @@ where
         let events = submit_extrinsic(&self.client, &self.rpc, &call, self.opts.signer()).await?;
 
         let instantiated = events
-            .find_first::<ContractInstantiated>()?
+            .find_last::<ContractInstantiated>()?
             .ok_or_else(|| anyhow!("Failed to find Instantiated event"))?;
 
         Ok(InstantiateExecResult {
