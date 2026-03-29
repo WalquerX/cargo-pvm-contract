@@ -66,7 +66,9 @@ where
             Ok(DryRunResult::DispatchError(err)) => {
                 Err(anyhow::format_err!("dispatch error: {err:?}"))
             }
-            Ok(DryRunResult::TransactionValidityError) => Ok(partial_fee_estimation),
+            Ok(DryRunResult::TransactionValidityError) => {
+                Err(anyhow::anyhow!("transaction validity error"))
+            }
             Err(err) => match err {
                 DryRunDecodeError::WrongNumberOfBytes => Err(anyhow::anyhow!(
                     "decode error: dry run result was less than 2 bytes"
