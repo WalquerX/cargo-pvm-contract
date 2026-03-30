@@ -357,6 +357,10 @@ fn generate_dynamic_encode_and_return(outputs: &[SolType]) -> TokenStream {
 mod tests {
     use super::*;
 
+    fn normalize_tokens(ts: TokenStream) -> String {
+        ts.to_string().split_whitespace().collect::<String>()
+    }
+
     #[test]
     fn generate_dispatch_arm_uses_dynamic_encoding_for_string_return_in_alloc_mode() {
         let method = MethodInfo {
@@ -372,10 +376,23 @@ mod tests {
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
         let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, true);
-        let arm = match_arm.to_string();
 
-        assert!(arm.contains("encode_len"));
-        assert!(!arm.contains("compile_error"));
+        let expected = quote! {
+            __SEL_greeting => {
+                let result = contract::greeting();
+                {
+                    let len = ::pvm_contract_types::SolEncode::encode_len(&result);
+                    let mut buf = alloc::vec![0u8; len];
+                    ::pvm_contract_types::SolEncode::encode_to(&result, &mut buf);
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::empty(),
+                        &buf
+                    );
+                }
+            }
+        };
+
+        assert_eq!(normalize_tokens(match_arm), normalize_tokens(expected));
     }
 
     #[test]
@@ -393,30 +410,27 @@ mod tests {
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
         let (const_def, _match_arm) = generate_dispatch_arm(&with_alias, &mod_name, false);
-        let const_def_str = const_def.to_string();
 
-        assert!(
-            const_def_str.contains("const_selector"),
-            "Custom type inputs should use const_selector, got: {const_def_str}"
-        );
-        assert!(
-            const_def_str.contains("concatcp"),
-            "Custom type inputs should use concatcp for signature, got: {const_def_str}"
-        );
-        assert!(
-            const_def_str.contains("SOL_NAME"),
-            "Custom type inputs should reference SOL_NAME, got: {const_def_str}"
-        );
+        let expected = quote! {
+            const __SEL_set_count: [u8; 4] = ::pvm_contract_types::const_selector(
+                ::pvm_contract_types::const_format::concatcp!(
+                    "setCount(",
+                    <Count as ::pvm_contract_types::SolEncode>::SOL_NAME,
+                    ")"
+                )
+            );
+        };
+
+        assert_eq!(normalize_tokens(const_def), normalize_tokens(expected));
     }
 
     #[test]
     fn dispatch_min_input_size_uses_head_size_for_custom_types() {
         let inputs = vec![SolType::Uint(64), SolType::Custom("Count".to_string())];
-        let min_size_expr = calculate_min_input_size(&inputs).to_string();
-        assert!(
-            min_size_expr.contains("HEAD_SIZE"),
-            "Custom type input should use HEAD_SIZE trait const, got: {min_size_expr}"
-        );
+        let min_size_expr = calculate_min_input_size(&inputs);
+        let expected =
+            quote! { 0 + 32usize + <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE };
+        assert_eq!(normalize_tokens(min_size_expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -434,16 +448,43 @@ mod tests {
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
         let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, false);
-        let arm = match_arm.to_string();
+        let expected = quote! {
+            __SEL_get_line => {
+                let result = contract::get_line();
+                {
+                    const __OUT_SIZE: usize =
+                        0 + <Point as ::pvm_contract_types::SolEncode>::HEAD_SIZE + 32usize;
+                    let mut out = [0u8; __OUT_SIZE];
+                    let mut offset = 0;
+                    let encoded = {
+                        let mut __buf = [0u8; <Point as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
+                        <Point as ::pvm_contract_types::SolEncode>::encode_to(
+                            &::core::convert::Into::into(result.0),
+                            &mut __buf
+                        );
+                        __buf
+                    };
+                    out[offset..offset + encoded.len()].copy_from_slice(&encoded);
+                    offset += encoded.len();
+                    let encoded = {
+                        let mut __buf = [0u8; <u64 as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
+                        <u64 as ::pvm_contract_types::SolEncode>::encode_to(
+                            &::core::convert::Into::into(result.1),
+                            &mut __buf
+                        );
+                        __buf
+                    };
+                    out[offset..offset + encoded.len()].copy_from_slice(&encoded);
+                    offset += encoded.len();
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::empty(),
+                        &out
+                    );
+                }
+            }
+        };
 
-        assert!(
-            arm.contains("encoded . len ()"),
-            "Multi-output with Custom type must use encoded.len(), not hardcoded 32: {arm}"
-        );
-        assert!(
-            arm.contains("HEAD_SIZE"),
-            "Output buffer size should use HEAD_SIZE for Custom type: {arm}"
-        );
+        assert_eq!(normalize_tokens(match_arm), normalize_tokens(expected));
     }
 
     #[test]
@@ -461,9 +502,16 @@ mod tests {
         let mod_name: syn::Ident = syn::parse_str("contract").unwrap();
 
         let (_const_def, match_arm) = generate_dispatch_arm(&method, &mod_name, false);
-        let arm = match_arm.to_string();
 
-        assert!(arm.contains("compile_error"));
-        assert!(arm.contains("requires an explicit allocator"));
+        let expected = quote! {
+            __SEL_greeting => {
+                let result = contract::greeting();
+                compile_error!(
+                    "Return type `string` is dynamic and requires an explicit allocator. Set `allocator = \"pico\"` or `allocator = \"bump\"` in `#[contract]`, or use static types."
+                );
+            }
+        };
+
+        assert_eq!(normalize_tokens(match_arm), normalize_tokens(expected));
     }
 }

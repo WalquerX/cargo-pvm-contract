@@ -90,6 +90,8 @@ fn expand_static_sol_type(
                 #decode_body
             }
         }
+
+        impl ::pvm_contract_types::SolArrayElement for #name {}
     })
 }
 
@@ -129,6 +131,8 @@ fn expand_dynamic_sol_type(
                 Self::decode_at(input, offset)
             }
         }
+
+        impl ::pvm_contract_types::SolArrayElement for #name {}
     })
 }
 
@@ -146,13 +150,9 @@ fn build_is_dynamic_expr(
     let parts: Vec<TokenStream> = field_info
         .iter()
         .zip(field_types.iter())
-        .map(|((_, t), ty)| {
-            if t.has_custom_types() {
-                quote! { <#ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC }
-            } else {
-                let is_dynamic = t.is_dynamic().unwrap_or(false);
-                quote! { #is_dynamic }
-            }
+        .map(|((_, t), ty)| match t.is_dynamic() {
+            Some(is_dyn) => quote! { #is_dyn },
+            None => quote! { <#ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC },
         })
         .collect();
 
@@ -170,8 +170,17 @@ fn build_sol_signature(field_info: &[(Option<syn::Ident>, SolType)]) -> String {
 pub(crate) fn sol_type_name_parts(ty: &SolType, parts: &mut Vec<TokenStream>) {
     match ty {
         SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            parts.push(quote! { <#type_path as ::pvm_contract_types::SolEncode>::SOL_NAME });
+            match syn::parse_str::<syn::Path>(name) {
+                Ok(type_path) => {
+                    parts.push(quote! { <#type_path as ::pvm_contract_types::SolEncode>::SOL_NAME });
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}"
+                    );
+                    parts.push(quote! { compile_error!(#msg) });
+                }
+            }
         }
         SolType::Array(inner) if inner.has_custom_types() => {
             sol_type_name_parts(inner, parts);
@@ -202,8 +211,20 @@ pub(crate) fn sol_type_name_parts(ty: &SolType, parts: &mut Vec<TokenStream>) {
 pub(crate) fn sol_type_head_size_expr(ty: &SolType) -> TokenStream {
     match ty {
         SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            quote! { <#type_path as ::pvm_contract_types::SolEncode>::HEAD_SIZE }
+            match syn::parse_str::<syn::Path>(name) {
+                Ok(type_path) => {
+                    quote! { <#type_path as ::pvm_contract_types::SolEncode>::HEAD_SIZE }
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}"
+                    );
+                    quote! {{
+                        compile_error!(#msg);
+                        0usize
+                    }}
+                }
+            }
         }
         SolType::FixedArray(inner, size) if inner.has_custom_types() => {
             let inner_size = sol_type_head_size_expr(inner);
@@ -277,8 +298,6 @@ fn get_field_types(fields: &Fields) -> Vec<&Type> {
 
 /// Generate encode body for static structs with Custom-type fields.
 /// Uses a running offset variable and trait-based encode_to calls.
-/// FixedArray and Tuple fields are expanded inline to avoid requiring
-/// SolEncode impls on container types like `[T; N]` or `(T, U)`.
 fn generate_static_encode_body_with_custom(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
@@ -287,7 +306,7 @@ fn generate_static_encode_body_with_custom(
     let mut stmts = Vec::new();
     stmts.push(quote! { let mut __offset: usize = 0; });
 
-    for (i, ((field_name, sol_type), field_ty)) in
+    for (i, ((field_name, _), field_ty)) in
         field_info.iter().zip(field_types.iter()).enumerate()
     {
         let field_access = match fields {
@@ -302,72 +321,44 @@ fn generate_static_encode_body_with_custom(
             Fields::Unit => continue,
         };
 
-        generate_encode_stmts_runtime(sol_type, field_ty, &field_access, &mut stmts);
+        generate_encode_stmt_runtime(field_ty, &field_access, &mut stmts);
     }
 
     quote! { #(#stmts)* }
 }
 
-/// Generate encoding statements for a value using runtime `__offset` tracking.
-/// Expands FixedArray and Tuple inline to avoid requiring trait impls on
-/// container types like `[T; N]` or `(T, U)`.
-fn generate_encode_stmts_runtime(
-    sol_type: &SolType,
+/// Generate an encoding statement for a value using runtime `__offset` tracking.
+/// All types (including `[T; N]` and tuples) have `SolEncode` impls, so we
+/// delegate to `encode_to` + `HEAD_SIZE` via the trait uniformly.
+fn generate_encode_stmt_runtime(
     field_ty: &Type,
     value_expr: &TokenStream,
     stmts: &mut Vec<TokenStream>,
 ) {
-    match sol_type {
-        SolType::FixedArray(inner, size) => {
-            let inner_ty = match field_ty {
-                Type::Array(arr) => &*arr.elem,
-                _ => panic!("FixedArray SolType should correspond to an array type"),
-            };
-            for i in 0..*size {
-                let idx = syn::Index::from(i);
-                let elem_expr = quote! { #value_expr[#idx] };
-                generate_encode_stmts_runtime(inner, inner_ty, &elem_expr, stmts);
-            }
-        }
-        SolType::Tuple(types) => {
-            let elem_types: Vec<&Type> = match field_ty {
-                Type::Tuple(tup) => tup.elems.iter().collect(),
-                _ => panic!("Tuple SolType should correspond to a tuple type"),
-            };
-            for (i, (t, elem_ty)) in types.iter().zip(elem_types.iter()).enumerate() {
-                let idx = syn::Index::from(i);
-                let elem_expr = quote! { #value_expr.#idx };
-                generate_encode_stmts_runtime(t, elem_ty, &elem_expr, stmts);
-            }
-        }
-        _ => {
-            stmts.push(quote! {
-                ::pvm_contract_types::SolEncode::encode_to(&#value_expr, &mut buf[__offset..]);
-                __offset += <#field_ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE;
-            });
-        }
-    }
+    stmts.push(quote! {
+        ::pvm_contract_types::SolEncode::encode_to(&#value_expr, &mut buf[__offset..]);
+        __offset += <#field_ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE;
+    });
 }
 
 /// Generate decode body for static structs with Custom-type fields.
+/// Generate decode body for static structs with Custom-type fields.
 /// Uses a running offset variable and trait-based decode_at calls.
-/// FixedArray and Tuple fields are expanded inline to avoid requiring
-/// SolDecode impls on container types like `[T; N]` or `(T, U)`.
 fn generate_static_decode_body_with_custom(
     fields: &Fields,
-    field_info: &[(Option<syn::Ident>, SolType)],
+    _field_info: &[(Option<syn::Ident>, SolType)],
 ) -> TokenStream {
     match fields {
         Fields::Named(named) => {
             let mut pre_stmts: Vec<TokenStream> = vec![quote! { let mut __offset: usize = 0; }];
             let mut field_lets = Vec::new();
 
-            for (field, (field_name, sol_type)) in named.named.iter().zip(field_info.iter()) {
-                let name = field_name.as_ref().unwrap();
+            for field in &named.named {
+                let name = field.ident.as_ref().unwrap();
                 let ty = &field.ty;
                 let tmp = quote::format_ident!("__field_{}", name);
 
-                let decode_expr = generate_decode_expr_runtime(sol_type, ty);
+                let decode_expr = generate_decode_expr_runtime(ty);
                 pre_stmts.push(quote! { let #tmp = #decode_expr; });
                 field_lets.push(quote! { #name: #tmp });
             }
@@ -381,13 +372,11 @@ fn generate_static_decode_body_with_custom(
             let mut pre_stmts: Vec<TokenStream> = vec![quote! { let mut __offset: usize = 0; }];
             let mut field_tmps = Vec::new();
 
-            for (i, (field, (_, sol_type))) in
-                unnamed.unnamed.iter().zip(field_info.iter()).enumerate()
-            {
+            for (i, field) in unnamed.unnamed.iter().enumerate() {
                 let ty = &field.ty;
                 let tmp = quote::format_ident!("__field_{}", i);
 
-                let decode_expr = generate_decode_expr_runtime(sol_type, ty);
+                let decode_expr = generate_decode_expr_runtime(ty);
                 pre_stmts.push(quote! { let #tmp = #decode_expr; });
                 field_tmps.push(quote! { #tmp });
             }
@@ -402,41 +391,14 @@ fn generate_static_decode_body_with_custom(
 }
 
 /// Generate a decode expression that reads from `input` at `offset + __offset`
-/// and advances `__offset` as a side effect. Evaluation order (left-to-right for
-/// array literals and tuple expressions) ensures correct sequential decoding.
-fn generate_decode_expr_runtime(sol_type: &SolType, field_ty: &Type) -> TokenStream {
-    match sol_type {
-        SolType::FixedArray(inner, size) => {
-            let inner_ty = match field_ty {
-                Type::Array(arr) => &*arr.elem,
-                _ => panic!("FixedArray SolType should correspond to an array type"),
-            };
-            let elem_decodes: Vec<TokenStream> = (0..*size)
-                .map(|_| generate_decode_expr_runtime(inner, inner_ty))
-                .collect();
-            quote! { [#(#elem_decodes),*] }
-        }
-        SolType::Tuple(types) => {
-            let elem_types: Vec<&Type> = match field_ty {
-                Type::Tuple(tup) => tup.elems.iter().collect(),
-                _ => panic!("Tuple SolType should correspond to a tuple type"),
-            };
-            let elem_decodes: Vec<TokenStream> = types
-                .iter()
-                .zip(elem_types.iter())
-                .map(|(t, elem_ty)| generate_decode_expr_runtime(t, elem_ty))
-                .collect();
-            quote! { (#(#elem_decodes),*) }
-        }
-        _ => {
-            quote! {{
-                let __val = <#field_ty as ::pvm_contract_types::SolDecode>::decode_at(
-                    input, offset + __offset);
-                __offset += <#field_ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE;
-                __val
-            }}
-        }
-    }
+/// and advances `__offset` as a side effect.
+fn generate_decode_expr_runtime(field_ty: &Type) -> TokenStream {
+    quote! {{
+        let __val = <#field_ty as ::pvm_contract_types::SolDecode>::decode_at(
+            input, offset + __offset);
+        __offset += <#field_ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE;
+        __val
+    }}
 }
 
 /// Compute the total head size expression for a dynamic struct.
@@ -485,23 +447,19 @@ fn build_dynamic_head_sum_expr(
     let parts: Vec<TokenStream> = field_info
         .iter()
         .zip(field_types.iter())
-        .map(|((_, t), ty)| {
-            if t.has_custom_types() {
-                quote! {
-                    if <#ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
-                        32usize
-                    } else {
-                        <#ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE
-                    }
-                }
-            } else if t.is_dynamic() == Some(true) {
-                quote! { 32usize }
-            } else {
-                let size = t
-                    .head_size()
-                    .expect("build_dynamic_head_sum_expr called on unresolved custom type");
+        .map(|((_, t), ty)| match t.is_dynamic() {
+            Some(true) => quote! { 32usize },
+            Some(false) => {
+                let size = t.head_size().unwrap();
                 quote! { #size }
             }
+            None => quote! {
+                if <#ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
+                    32usize
+                } else {
+                    <#ty as ::pvm_contract_types::SolEncode>::HEAD_SIZE
+                }
+            },
         })
         .collect();
 
@@ -531,20 +489,18 @@ fn generate_dynamic_encode_len(
                 Fields::Unit => return None,
             };
 
-            if sol_type.has_custom_types() {
-                Some(quote! {
+            match sol_type.is_dynamic() {
+                Some(true) => Some(quote! {
+                    ::pvm_contract_types::SolEncode::tail_len(&#field_access)
+                }),
+                Some(false) => None,
+                None => Some(quote! {
                     if <#field_ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
                         ::pvm_contract_types::SolEncode::tail_len(&#field_access)
                     } else {
                         0usize
                     }
-                })
-            } else if sol_type.is_dynamic() == Some(true) {
-                Some(quote! {
-                    ::pvm_contract_types::SolEncode::tail_len(&#field_access)
-                })
-            } else {
-                None
+                }),
             }
         })
         .collect();
@@ -803,8 +759,19 @@ fn generate_dynamic_field_decode(
     sol_type: &SolType,
     head_offset_expr: &TokenStream,
 ) -> TokenStream {
-    if sol_type.has_custom_types() {
-        quote! {{
+    match sol_type.is_dynamic() {
+        Some(true) => quote! {{
+            let __ho = #head_offset_expr;
+            let __field_offset =
+                u64::from_be_bytes(input[offset + __ho + 24..offset + __ho + 32].try_into().unwrap())
+                    as usize;
+            <#ty as ::pvm_contract_types::SolDecode>::decode_tail(input, offset + __field_offset)
+        }},
+        Some(false) => quote! {{
+            let __ho = #head_offset_expr;
+            <#ty as ::pvm_contract_types::SolDecode>::decode_at(input, offset + __ho)
+        }},
+        None => quote! {{
             let __ho = #head_offset_expr;
             if <#ty as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
                 let __field_offset =
@@ -814,20 +781,7 @@ fn generate_dynamic_field_decode(
             } else {
                 <#ty as ::pvm_contract_types::SolDecode>::decode_at(input, offset + __ho)
             }
-        }}
-    } else if sol_type.is_dynamic() == Some(true) {
-        quote! {{
-            let __ho = #head_offset_expr;
-            let __field_offset =
-                u64::from_be_bytes(input[offset + __ho + 24..offset + __ho + 32].try_into().unwrap())
-                    as usize;
-            <#ty as ::pvm_contract_types::SolDecode>::decode_tail(input, offset + __field_offset)
-        }}
-    } else {
-        quote! {{
-            let __ho = #head_offset_expr;
-            <#ty as ::pvm_contract_types::SolDecode>::decode_at(input, offset + __ho)
-        }}
+        }},
     }
 }
 
@@ -926,42 +880,7 @@ fn generate_field_encode(
                 buf[#offset + #size_lit..#offset + 32].fill(0);
             }
         }
-        SolType::FixedArray(inner, size) => {
-            let elem_size = inner
-                .head_size()
-                .expect("generate_field_encode fixed array requires known static inner size");
-            let encode_stmts: Vec<_> = (0..*size)
-                .map(|i| {
-                    let elem_offset = offset + i * elem_size;
-                    let idx = syn::Index::from(i);
-                    let elem_expr = quote! { #value_expr[#idx] };
-                    generate_field_encode(inner, &elem_expr, elem_offset)
-                })
-                .collect();
-            quote! {
-                #(#encode_stmts)*
-            }
-        }
-        SolType::Tuple(types) => {
-            let mut current_offset = offset;
-            let encode_stmts: Vec<_> = types
-                .iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    let idx = syn::Index::from(i);
-                    let elem_expr = quote! { #value_expr.#idx };
-                    let stmt = generate_field_encode(t, &elem_expr, current_offset);
-                    current_offset += t
-                        .head_size()
-                        .expect("generate_field_encode tuple requires known static element size");
-                    stmt
-                })
-                .collect();
-            quote! {
-                #(#encode_stmts)*
-            }
-        }
-        SolType::String | SolType::DynBytes | SolType::Array(_) | SolType::Custom(_) => {
+        _ => {
             quote! {
                 ::pvm_contract_types::SolEncode::encode_to(&#value_expr, &mut buf[#offset..]);
             }
@@ -973,6 +892,10 @@ fn generate_field_encode(
 mod tests {
     use super::*;
     use crate::signature::SolType;
+
+    fn normalize_tokens(ts: TokenStream) -> String {
+        ts.to_string().split_whitespace().collect::<String>()
+    }
 
     #[test]
     fn custom_type_field_total_size_uses_trait_expression() {
@@ -986,8 +909,9 @@ mod tests {
                 SolType::Custom("Count".to_string()),
             ),
         ];
-        let expr = build_total_size_expr(&field_info).to_string();
-        assert!(expr.contains("HEAD_SIZE"), "got: {expr}");
+        let expr = build_total_size_expr(&field_info);
+        let expected = quote! { 0 + 32usize + <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -996,9 +920,15 @@ mod tests {
             Some(syn::parse_str::<syn::Ident>("count").unwrap()),
             SolType::Custom("Count".to_string()),
         )];
-        let expr = build_sol_name_expr(&field_info).to_string();
-        assert!(expr.contains("concatcp"), "got: {expr}");
-        assert!(expr.contains("SOL_NAME"), "got: {expr}");
+        let expr = build_sol_name_expr(&field_info);
+        let expected = quote! {
+            ::pvm_contract_types::const_format::concatcp!(
+                "(",
+                <Count as ::pvm_contract_types::SolEncode>::SOL_NAME,
+                ")"
+            )
+        };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1013,9 +943,9 @@ mod tests {
                 SolType::Uint(64),
             ),
         ];
-        let expr = build_sol_name_expr(&field_info).to_string();
-        assert!(expr.contains("uint64"), "got: {expr}");
-        assert!(!expr.contains("concatcp"), "got: {expr}");
+        let expr = build_sol_name_expr(&field_info);
+        let expected = quote! { "(uint64,uint64)" };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1030,8 +960,13 @@ mod tests {
                 SolType::Custom("Point".to_string()),
             ),
         ];
-        let expr = build_total_size_expr(&field_info).to_string();
-        assert!(expr.contains("HEAD_SIZE"), "got: {expr}");
+        let expr = build_total_size_expr(&field_info);
+        let expected = quote! {
+            0 +
+            <Point as ::pvm_contract_types::SolEncode>::HEAD_SIZE +
+            <Point as ::pvm_contract_types::SolEncode>::HEAD_SIZE
+        };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1059,9 +994,17 @@ mod tests {
             ),
         ];
 
-        let expr = build_dynamic_head_size_expr(fields, &field_info).to_string();
-        assert!(expr.contains("IS_DYNAMIC"), "got: {expr}");
-        assert!(expr.contains("HEAD_SIZE"), "got: {expr}");
+        let expr = build_dynamic_head_size_expr(fields, &field_info);
+        let expected = quote! {
+            (0 +
+                if <Count as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
+                    32usize
+                } else {
+                    <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE
+                }
+                + 32usize)
+        };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1095,9 +1038,17 @@ mod tests {
             ),
         ];
 
-        let expr = build_dynamic_field_offset_expr(&field_info, &field_types, 2).to_string();
-        assert!(expr.contains("IS_DYNAMIC"), "got: {expr}");
-        assert!(expr.contains("HEAD_SIZE"), "got: {expr}");
+        let expr = build_dynamic_field_offset_expr(&field_info, &field_types, 2);
+        let expected = quote! {
+            (0 +
+                if <Count as ::pvm_contract_types::SolEncode>::IS_DYNAMIC {
+                    32usize
+                } else {
+                    <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE
+                }
+                + 32usize)
+        };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1125,9 +1076,11 @@ mod tests {
             ),
         ];
 
-        let expr = build_is_dynamic_expr(fields, &field_info).to_string();
-        assert!(expr.contains("IS_DYNAMIC"), "got: {expr}");
-        assert!(!expr.contains("= true"), "got: {expr}");
+        let expr = build_is_dynamic_expr(fields, &field_info);
+        let expected = quote! {
+            false || <Point as ::pvm_contract_types::SolEncode>::IS_DYNAMIC || false
+        };
+        assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 
     #[test]
@@ -1139,19 +1092,13 @@ mod tests {
             }
         };
 
-        let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(
-            expanded.contains("const IS_DYNAMIC : bool = false ||"),
-            "got: {expanded}"
-        );
-        assert!(
-            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"),
-            "got: {expanded}"
-        );
-        assert!(
-            !expanded.contains("const IS_DYNAMIC : bool = true ;"),
-            "got: {expanded}"
-        );
+        let expanded = normalize_tokens(expand_sol_type(input).unwrap());
+        let expected_is_dynamic = normalize_tokens(quote! {
+            const IS_DYNAMIC: bool = false
+                || <Point as ::pvm_contract_types::SolEncode>::IS_DYNAMIC
+                || <Point as ::pvm_contract_types::SolEncode>::IS_DYNAMIC;
+        });
+        assert!(expanded.contains(&expected_is_dynamic));
     }
 
     #[test]
@@ -1163,12 +1110,13 @@ mod tests {
             }
         };
 
-        let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(
-            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: IS_DYNAMIC"),
-            "got: {expanded}"
-        );
-        assert!(expanded.contains("|| true"), "got: {expanded}");
+        let expanded = normalize_tokens(expand_sol_type(input).unwrap());
+        let expected_is_dynamic = normalize_tokens(quote! {
+            const IS_DYNAMIC: bool = false
+                || <Point as ::pvm_contract_types::SolEncode>::IS_DYNAMIC
+                || true;
+        });
+        assert!(expanded.contains(&expected_is_dynamic));
     }
 
     #[test]
@@ -1180,14 +1128,8 @@ mod tests {
             }
         };
 
-        let expanded = expand_sol_type(input).unwrap().to_string();
-        assert!(
-            expanded.contains("const HEAD_SIZE : usize ="),
-            "got: {expanded}"
-        );
-        assert!(
-            expanded.contains("< Point as :: pvm_contract_types :: SolEncode > :: HEAD_SIZE"),
-            "got: {expanded}"
-        );
+        let expanded = normalize_tokens(expand_sol_type(input).unwrap());
+        assert!(expanded.contains("constHEAD_SIZE:usize="));
+        assert!(expanded.contains("<Pointas::pvm_contract_types::SolEncode>::HEAD_SIZE"));
     }
 }

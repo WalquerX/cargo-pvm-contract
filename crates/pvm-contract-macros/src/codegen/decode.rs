@@ -30,7 +30,7 @@ pub fn generate_decode(
     let offset_lit = offset;
 
     match ty {
-        SolType::Address => generate_sol_decode(quote!([u8; 20]), &data_expr, offset),
+        SolType::Address => generate_sol_decode(quote!(::pvm_contract_types::Address), &data_expr, offset),
         SolType::Bool => generate_sol_decode(quote!(bool), &data_expr, offset),
         SolType::Uint(8) => generate_sol_decode(quote!(u8), &data_expr, offset),
         SolType::Uint(16) => generate_sol_decode(quote!(u16), &data_expr, offset),
@@ -68,14 +68,9 @@ pub fn generate_decode(
                 ::pvm_contract_types::I256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32])
             }
         }
-        SolType::Bytes(32) => generate_sol_decode(quote!([u8; 32]), &data_expr, offset),
         SolType::Bytes(size) => {
             let size_lit = *size;
-            quote! {{
-                let mut bytes = [0u8; #size_lit];
-                bytes.copy_from_slice(&#data_expr[#offset_lit..#offset_lit + #size_lit]);
-                bytes
-            }}
+            generate_sol_decode(quote!([u8; #size_lit]), &data_expr, offset)
         }
         SolType::DynBytes => {
             if use_alloc {
@@ -162,9 +157,21 @@ pub fn generate_decode(
             }
         }
         SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            quote! {
-            <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&#data_expr, #offset_lit)
+            match syn::parse_str::<syn::Path>(name) {
+                Ok(type_path) => {
+                    quote! {
+                    <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&#data_expr, #offset_lit)
+                    }
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Invalid custom type path `{name}` in decode codegen: {err}"
+                    );
+                    quote! {{
+                        compile_error!(#msg);
+                        ::core::unreachable!()
+                    }}
+                }
             }
         }
     }
@@ -218,7 +225,7 @@ fn generate_decode_params_with_runtime_offset(
 
 fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream {
     match ty {
-        SolType::Address => generate_sol_decode_runtime(quote!([u8; 20])),
+        SolType::Address => generate_sol_decode_runtime(quote!(::pvm_contract_types::Address)),
         SolType::Bool => generate_sol_decode_runtime(quote!(bool)),
         SolType::Uint(8) => generate_sol_decode_runtime(quote!(u8)),
         SolType::Uint(16) => generate_sol_decode_runtime(quote!(u16)),
@@ -242,20 +249,27 @@ fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream 
         SolType::Int(_) => {
             quote! { ::pvm_contract_types::I256::from_be_slice(&input[__decode_offset..__decode_offset + 32]) }
         }
-        SolType::Bytes(32) => generate_sol_decode_runtime(quote!([u8; 32])),
         SolType::Bytes(size) => {
             let size_lit = *size;
-            quote! {{
-                let mut bytes = [0u8; #size_lit];
-                bytes.copy_from_slice(&input[__decode_offset..__decode_offset + #size_lit]);
-                bytes
-            }}
+            generate_sol_decode_runtime(quote!([u8; #size_lit]))
         }
         SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            quote! { <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&input, __decode_offset) }
+            match syn::parse_str::<syn::Path>(name) {
+                Ok(type_path) => {
+                    quote! { <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&input, __decode_offset) }
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Invalid custom type path `{name}` in decode codegen: {err}"
+                    );
+                    quote! {{
+                        compile_error!(#msg);
+                        ::core::unreachable!()
+                    }}
+                }
+            }
         }
-        _ => generate_decode(ty, quote!(input), 0, use_alloc),
+        _ => generate_decode(ty, quote!(&input[__decode_offset..]), 0, use_alloc),
     }
 }
 

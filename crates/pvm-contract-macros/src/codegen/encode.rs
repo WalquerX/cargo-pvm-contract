@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
+use super::sol_type::sol_type_head_size_expr;
 use crate::signature::SolType;
 
 fn generate_sol_encode<T: quote::ToTokens>(rust_type: T, value_expr: &TokenStream) -> TokenStream {
@@ -13,7 +14,7 @@ fn generate_sol_encode<T: quote::ToTokens>(rust_type: T, value_expr: &TokenStrea
 
 pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -> TokenStream {
     match ty {
-        SolType::Address => generate_sol_encode(quote!([u8; 20]), &value_expr),
+        SolType::Address => generate_sol_encode(quote!(::pvm_contract_types::Address), &value_expr),
         SolType::Bool => generate_sol_encode(quote!(bool), &value_expr),
         SolType::Uint(8) => generate_sol_encode(quote!(u8), &value_expr),
         SolType::Uint(16) => generate_sol_encode(quote!(u16), &value_expr),
@@ -64,30 +65,38 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                 #value_expr.to_be_bytes::<32>()
             }
         }
-        SolType::Bytes(32) => generate_sol_encode(quote!([u8; 32]), &value_expr),
         SolType::Bytes(size) => {
             let size_lit = *size;
-            quote! {{
-                let mut out = [0u8; 32];
-                out[..#size_lit].copy_from_slice(&#value_expr);
-                out
-            }}
+            generate_sol_encode(quote!([u8; #size_lit]), &value_expr)
         }
         SolType::DynBytes | SolType::String | SolType::Array(_) => {
             panic!("Dynamic types require special handling in tuple encoding");
         }
         SolType::Custom(name) => {
-            let type_path: syn::Path = syn::parse_str(name).unwrap();
-            quote! {
-                {
-                    let mut __buf = [0u8; <#type_path as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
-                    <#type_path as ::pvm_contract_types::SolEncode>::encode_to(&#value_expr, &mut __buf);
-                    __buf
+            match syn::parse_str::<syn::Path>(name) {
+                Ok(type_path) => {
+                    quote! {
+                        {
+                            let mut __buf = [0u8; <#type_path as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
+                            <#type_path as ::pvm_contract_types::SolEncode>::encode_to(&#value_expr, &mut __buf);
+                            __buf
+                        }
+                    }
+                }
+                Err(err) => {
+                    let msg = format!(
+                        "Invalid custom type path `{name}` in encode codegen: {err}"
+                    );
+                    quote! {{
+                        compile_error!(#msg);
+                        ::core::unreachable!()
+                    }}
                 }
             }
         }
         SolType::FixedArray(inner, size) => {
             let size_lit = *size;
+            let elem_size = sol_type_head_size_expr(inner);
             let inner_encodes: Vec<_> = (0..*size)
                 .map(|i| {
                     let idx = i;
@@ -96,17 +105,18 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                 .collect();
             if use_alloc {
                 quote! {{
-                    let mut out = alloc::vec::Vec::with_capacity(#size_lit * 32);
+                    let mut out = alloc::vec::Vec::with_capacity(#size_lit * #elem_size);
                     #(out.extend_from_slice(&#inner_encodes);)*
                     out
                 }}
             } else {
                 quote! {{
-                    let mut out = [0u8; #size_lit * 32];
+                    let mut out = [0u8; #size_lit * #elem_size];
                     let mut offset = 0;
                     #(
-                        out[offset..offset + 32].copy_from_slice(&#inner_encodes);
-                        offset += 32;
+                        let encoded = #inner_encodes;
+                        out[offset..offset + encoded.len()].copy_from_slice(&encoded);
+                        offset += encoded.len();
                     )*
                     out
                 }}
@@ -141,8 +151,8 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
                         let mut offset = 0;
                         #(
                             let encoded = #encodes;
-                            out[offset..offset + 32].copy_from_slice(&encoded);
-                            offset += 32;
+                            out[offset..offset + encoded.len()].copy_from_slice(&encoded);
+                            offset += encoded.len();
                         )*
                         out
                     }}

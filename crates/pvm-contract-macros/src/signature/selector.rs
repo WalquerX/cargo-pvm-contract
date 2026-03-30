@@ -1,8 +1,5 @@
 pub fn compute_selector(canonical_signature: &str) -> [u8; 4] {
-    let hash = keccak_const::Keccak256::new()
-        .update(canonical_signature.as_bytes())
-        .finalize();
-    [hash[0], hash[1], hash[2], hash[3]]
+    pvm_contract_types::const_selector(canonical_signature)
 }
 
 #[cfg(test)]

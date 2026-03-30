@@ -186,7 +186,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///         // balanceOf(address) -> uint256 - Infallible method
 ///         [0x70, 0xa0, 0x82, 0x31] => {
 ///             // Decode parameters
-///             let account = <[u8; 20] as ::pvm_contract_types::SolDecode>::decode(&input);
+///             let account = <::pvm_contract_types::Address as ::pvm_contract_types::SolDecode>::decode(&input);
 ///
 ///             // Call the method
 ///             let result = my_token::balance_of(account);
@@ -201,7 +201,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///         // transfer(address,uint256) - Fallible method
 ///         [0xa9, 0x05, 0x9c, 0xbb] => {
 ///             // Decode parameters
-///             let to = <[u8; 20] as ::pvm_contract_types::SolDecode>::decode(&input);
+///             let to = <::pvm_contract_types::Address as ::pvm_contract_types::SolDecode>::decode(&input);
 ///             let amount = <ruint::aliases::U256 as ::pvm_contract_types::SolDecode>::decode_at(&input, 32);
 ///
 ///             // Call method and handle Result

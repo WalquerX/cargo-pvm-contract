@@ -268,11 +268,12 @@ fn encode_decode_bool_proptest() {
 #[test]
 fn encode_decode_address_proptest() {
     proptest!(|(val: [u8; 20])| {
+        let addr = Address::from(val);
         let alloy = AlloyAddress::from(val).abi_encode();
-        let mut buf = vec![0u8; val.encode_len()];
-        val.encode_to(&mut buf);
+        let mut buf = vec![0u8; addr.encode_len()];
+        addr.encode_to(&mut buf);
         prop_assert_eq!(&buf, &alloy);
-        prop_assert_eq!(<[u8; 20]>::decode(&buf), val);
+        prop_assert_eq!(Address::decode(&buf), addr);
     });
 }
 
@@ -346,8 +347,9 @@ fn encode_decode_vec_string_proptest() {
 
 #[test]
 fn encode_decode_vec_address_proptest() {
-    proptest!(|(val in proptest::collection::vec(any::<[u8; 20]>(), 0..8))| {
-        let alloy = val
+    proptest!(|(raw in proptest::collection::vec(any::<[u8; 20]>(), 0..8))| {
+        let val: Vec<Address> = raw.iter().map(|a| Address::from(*a)).collect();
+        let alloy = raw
             .iter()
             .map(|a| AlloyAddress::from(*a))
             .collect::<Vec<_>>()
@@ -355,7 +357,7 @@ fn encode_decode_vec_address_proptest() {
         let mut buf = vec![0u8; val.encode_len()];
         val.encode_to(&mut buf);
         prop_assert_eq!(&buf, &alloy);
-        prop_assert_eq!(Vec::<[u8; 20]>::decode(&buf), val);
+        prop_assert_eq!(Vec::<Address>::decode(&buf), val);
     });
 }
 
@@ -503,11 +505,7 @@ fn encode_decode_dynamic_struct_string_then_static() {
 
 #[test]
 fn encode_decode_many_field_static_struct() {
-    // NOTE: [u8; 20] and Address fields are not used here because:
-    // - [u8; 20] is parsed as FixedArray(Uint(8), 20) by the SolType derive
-    //   (the arrafires before y pattern in from_rust_type the string match),
-    // - Address generates copy_from_slice(&self.g) which type-mismatches.
-    // Both are tracked codegen bugs.
+    // Uses Address wrapper for address fields (raw [u8; 20] is now uint8[20]).
     #[derive(Clone, Debug, PartialEq, Eq, SolType)]
     struct Wide {
         a: u8,
@@ -533,195 +531,197 @@ fn encode_decode_many_field_static_struct() {
     });
 }
 
-// NOTE: No SolEncode/SolDecode impls exist for bare [T; N] or (T, U) types.
-// Fixed arrays and tuples are expanded inline element-by-element by the proc
-// macro when they appear as struct fields.  The encoding behaviour is tested
-// through SolType-derived structs (e.g. the Line/NamedPoint/Profile tests
-// above, plus the type_alias_resolution and derive_sol_type_vec test suites).
+// [T; N] and tuples have blanket SolEncode/SolDecode impls.
+// The tests below exercise these container types directly.
 // ========================================================================
 // Fixed array [T; N]
 // ========================================================================
 
-// #[test]
-// fn encode_decode_fixed_array_of_struct() {
-//     #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
-//     struct Point {
-//         x: u64,
-//         y: u64,
-//     }
+#[test]
+fn encode_decode_fixed_array_of_struct() {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
+    struct Point {
+        x: u64,
+        y: u64,
+    }
 
-//     let val = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
-//     // [Point; 2] encodes as (uint64,uint64),(uint64,uint64) — contiguous elements
-//     let alloy = [(1u64, 2u64), (3u64, 4u64)].abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy);
-//     assert_eq!(<[Point; 2]>::decode(&buf), val);
-// }
+    let val = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+    let alloy = [(1u64, 2u64), (3u64, 4u64)].abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy);
+    assert_eq!(<[Point; 2]>::decode(&buf), val);
+}
 
-// #[test]
-// fn encode_decode_fixed_array_of_primitives() {
-//     let val: [u32; 3] = [10, 20, 30];
-//     let alloy = [10u32, 20u32, 30u32].abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy);
-//     assert_eq!(<[u32; 3]>::decode(&buf), val);
-// }
+#[test]
+fn encode_decode_fixed_array_of_primitives() {
+    let val = [10u32, 20u32, 30u32];
+    let alloy = [10u32, 20u32, 30u32].abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy);
+    assert_eq!(<[u32; 3]>::decode(&buf), val);
+}
 
 // ========================================================================
 // Tuple types
 // ========================================================================
 
-// #[test]
-// fn encode_decode_tuple_mixed_types() {
-//     let val: (u64, bool, Address) = (42, true, Address([0xAB; 20]));
-//     let alloy = (42u64, true, AlloyAddress::from([0xAB; 20])).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy);
-//     assert_eq!(<(u64, bool, Address)>::decode(&buf), val);
-// }
+#[test]
+fn encode_decode_tuple_mixed_types() {
+    let val = (42u64, true, Address([0xAB; 20]));
+    let alloy = (42u64, true, AlloyAddress::from([0xAB; 20])).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy);
+    assert_eq!(<(u64, bool, Address)>::decode(&buf), val);
+}
 
-// #[test]
-// fn encode_decode_tuple_with_struct() {
-//     #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
-//     struct Point {
-//         x: u64,
-//         y: u64,
-//     }
+#[test]
+fn encode_decode_tuple_with_struct() {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
+    struct Point {
+        x: u64,
+        y: u64,
+    }
 
-//     let val = (Point { x: 1, y: 2 }, 42u32);
-//     let alloy = ((1u64, 2u64), 42u32).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy);
-//     assert_eq!(<(Point, u32)>::decode(&buf), val);
-// }
-
-// ========================================================================
-// Dynamic tuples — tuples containing String/Vec elements
-// ========================================================================
-
-// #[test]
-// fn encode_decode_tuple_u64_string() {
-//     let val = (42u64, "hello".to_string());
-//     let alloy = (42u64, "hello".to_string()).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     // alloy wraps dynamic tuples with a top-level offset prefix
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(<(u64, alloc::string::String)>::decode(&buf), val);
-// }
-
-// #[test]
-// fn encode_decode_tuple_string_u64() {
-//     let val = ("world".to_string(), 99u64);
-//     let alloy = ("world".to_string(), 99u64).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(<(alloc::string::String, u64)>::decode(&buf), val);
-// }
-
-// #[test]
-// fn encode_decode_tuple_string_string() {
-//     let val = ("foo".to_string(), "bar".to_string());
-//     let alloy = ("foo".to_string(), "bar".to_string()).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(
-//         <(alloc::string::String, alloc::string::String)>::decode(&buf),
-//         val
-//     );
-// }
-
-// #[test]
-// fn encode_decode_tuple_u64_string_bool() {
-//     let val = (42u64, "hello".to_string(), true);
-//     let alloy = (42u64, "hello".to_string(), true).abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(<(u64, alloc::string::String, bool)>::decode(&buf), val);
-// }
-
-// #[test]
-// fn encode_decode_tuple_u64_string_proptest() {
-//     proptest!(|(id: u64, name: alloc::string::String)| {
-//         let val = (id, name.clone());
-//         let alloy = (id, name).abi_encode();
-//         let mut buf = vec![0u8; val.encode_len()];
-//         val.encode_to(&mut buf);
-//         prop_assert_eq!(&buf, &alloy[32..]);
-//         prop_assert_eq!(<(u64, alloc::string::String)>::decode(&buf), val);
-//     });
-// }
+    let val = (Point { x: 1, y: 2 }, 42u32);
+    let alloy = ((1u64, 2u64), 42u32).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy);
+    assert_eq!(<(Point, u32)>::decode(&buf), val);
+}
 
 // ========================================================================
-// Dynamic fixed arrays — [String; N]
+// Dynamic tuples — structs with mixed static/dynamic fields
 // ========================================================================
 
-// #[test]
-// fn encode_decode_fixed_array_of_strings() {
-//     let val = ["alpha".to_string(), "beta".to_string()];
-//     let alloy = ["alpha".to_string(), "beta".to_string()].abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     // alloy wraps dynamic arrays with a top-level offset prefix
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(<[alloc::string::String; 2]>::decode(&buf), val);
-// }
+#[test]
+fn encode_decode_tuple_u64_string() {
+    let val = (42u64, "hello".to_string());
+    let alloy = (42u64, "hello".to_string()).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    // alloy wraps dynamic tuples with a top-level offset prefix
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(<(u64, alloc::string::String)>::decode(&buf), val);
+}
 
-// #[test]
-// fn encode_decode_fixed_array_of_strings_proptest() {
-//     proptest!(|(a: alloc::string::String, b: alloc::string::String)| {
-//         let val = [a.clone(), b.clone()];
-//         let alloy = [a, b].abi_encode();
-//         let mut buf = vec![0u8; val.encode_len()];
-//         val.encode_to(&mut buf);
-//         prop_assert_eq!(&buf, &alloy[32..]);
-//         prop_assert_eq!(<[alloc::string::String; 2]>::decode(&buf), val);
-//     });
-// }
+#[test]
+fn encode_decode_tuple_string_u64() {
+    let val = ("world".to_string(), 99u64);
+    let alloy = ("world".to_string(), 99u64).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(<(alloc::string::String, u64)>::decode(&buf), val);
+}
+
+#[test]
+fn encode_decode_tuple_string_string() {
+    let val = ("foo".to_string(), "bar".to_string());
+    let alloy = ("foo".to_string(), "bar".to_string()).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(<(alloc::string::String, alloc::string::String)>::decode(&buf), val);
+}
+
+#[test]
+fn encode_decode_tuple_u64_string_bool() {
+    let val = (42u64, "hello".to_string(), true);
+    let alloy = (42u64, "hello".to_string(), true).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(<(u64, alloc::string::String, bool)>::decode(&buf), val);
+}
+
+#[test]
+fn encode_decode_tuple_u64_string_proptest() {
+    proptest!(|(id: u64, name: alloc::string::String)| {
+        let val = (id, name.clone());
+        let alloy = (id, name).abi_encode();
+        let mut buf = vec![0u8; val.encode_len()];
+        val.encode_to(&mut buf);
+        prop_assert_eq!(&buf, &alloy[32..]);
+        prop_assert_eq!(<(u64, alloc::string::String)>::decode(&buf), val);
+    });
+}
+
+// ========================================================================
+// Dynamic fixed arrays — struct containing [String; N]
+// ========================================================================
+
+#[test]
+fn encode_decode_fixed_array_of_strings() {
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct TwoNames {
+        items: [alloc::string::String; 2],
+    }
+
+    let val = TwoNames { items: ["alpha".to_string(), "beta".to_string()] };
+    let alloy = (["alpha".to_string(), "beta".to_string()],).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(TwoNames::decode(&buf), val);
+}
+
+#[test]
+fn encode_decode_fixed_array_of_strings_proptest() {
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct TwoNames {
+        items: [alloc::string::String; 2],
+    }
+
+    proptest!(|(a: alloc::string::String, b: alloc::string::String)| {
+        let val = TwoNames { items: [a.clone(), b.clone()] };
+        let alloy = ([a, b],).abi_encode();
+        let mut buf = vec![0u8; val.encode_len()];
+        val.encode_to(&mut buf);
+        prop_assert_eq!(&buf, &alloy[32..]);
+        prop_assert_eq!(TwoNames::decode(&buf), val);
+    });
+}
 
 // ========================================================================
 // Dynamic struct containing [Struct; N] (the "Polygon" pattern)
 // ========================================================================
 
-// #[test]
-// fn encode_decode_dynamic_struct_with_fixed_array_of_structs() {
-//     #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
-//     struct Point {
-//         x: u64,
-//         y: u64,
-//     }
+#[test]
+fn encode_decode_dynamic_struct_with_fixed_array_of_structs() {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, SolType)]
+    struct Point {
+        x: u64,
+        y: u64,
+    }
 
-//     #[derive(Clone, Debug, PartialEq, Eq, SolType)]
-//     struct Polygon {
-//         vertices: [Point; 3],
-//         name: alloc::string::String,
-//     }
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct Polygon {
+        vertices: [Point; 3],
+        name: alloc::string::String,
+    }
 
-//     let val = Polygon {
-//         vertices: [
-//             Point { x: 1, y: 2 },
-//             Point { x: 3, y: 4 },
-//             Point { x: 5, y: 6 },
-//         ],
-//         name: "triangle".to_string(),
-//     };
-//     let alloy = (
-//         [(1u64, 2u64), (3u64, 4u64), (5u64, 6u64)],
-//         "triangle".to_string(),
-//     )
-//         .abi_encode();
-//     let mut buf = vec![0u8; val.encode_len()];
-//     val.encode_to(&mut buf);
-//     assert_eq!(&buf, &alloy[32..]);
-//     assert_eq!(Polygon::decode(&buf), val);
-// }
+    let val = Polygon {
+        vertices: [
+            Point { x: 1, y: 2 },
+            Point { x: 3, y: 4 },
+            Point { x: 5, y: 6 },
+        ],
+        name: "triangle".to_string(),
+    };
+    let alloy = (
+        [(1u64, 2u64), (3u64, 4u64), (5u64, 6u64)],
+        "triangle".to_string(),
+    )
+        .abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(Polygon::decode(&buf), val);
+}
 
 // ========================================================================
 // Vec<Struct> with nested custom types
@@ -813,9 +813,11 @@ fn sol_type_name_primitives() {
     assert_eq!(<i16 as SolEncode>::SOL_NAME, "int16");
     assert_eq!(<i8 as SolEncode>::SOL_NAME, "int8");
     assert_eq!(<bool as SolEncode>::SOL_NAME, "bool");
-    assert_eq!(<[u8; 20] as SolEncode>::SOL_NAME, "address");
     assert_eq!(<Address as SolEncode>::SOL_NAME, "address");
     assert_eq!(<[u8; 32] as SolEncode>::SOL_NAME, "bytes32");
+    assert_eq!(<[u8; 20] as SolEncode>::SOL_NAME, "bytes20");
+    assert_eq!(<[u8; 4] as SolEncode>::SOL_NAME, "bytes4");
+    assert_eq!(<[u64; 3] as SolEncode>::SOL_NAME, "uint64[3]");
 }
 
 #[test]
@@ -843,7 +845,7 @@ fn vec_sol_name_for_primitive_types() {
     assert_eq!(<Vec<i64> as SolEncode>::SOL_NAME, "int64[]");
     assert_eq!(<Vec<i128> as SolEncode>::SOL_NAME, "int128[]");
     assert_eq!(<Vec<bool> as SolEncode>::SOL_NAME, "bool[]");
-    assert_eq!(<Vec<[u8; 20]> as SolEncode>::SOL_NAME, "address[]");
+    assert_eq!(<Vec<Address> as SolEncode>::SOL_NAME, "address[]");
     assert_eq!(<Vec<[u8; 32]> as SolEncode>::SOL_NAME, "bytes32[]");
 }
 
@@ -996,13 +998,13 @@ fn encode_decode_empty_vec_string() {
 
 #[test]
 fn encode_decode_empty_vec_address() {
-    let val: Vec<[u8; 20]> = vec![];
+    let val: Vec<Address> = vec![];
     let alloy_val: Vec<AlloyAddress> = vec![];
     let alloy = alloy_val.abi_encode();
     let mut buf = vec![0u8; val.encode_len()];
     val.encode_to(&mut buf);
     assert_eq!(&buf, &alloy);
-    assert_eq!(Vec::<[u8; 20]>::decode(&buf), val);
+    assert_eq!(Vec::<Address>::decode(&buf), val);
 }
 
 #[test]
@@ -1116,22 +1118,16 @@ fn const_selector_matches_known_solidity_selectors() {
 // Struct with Vec field (dynamic struct containing a dynamic collection)
 // ========================================================================
 
-// BUG: [u8; 20] is parsed as FixedArray(Uint(8), 20) instead of Address by the
-// SolType derive (the array pattern in from_rust_type fires before the string
-// match), causing the head_size calculation to be wrong.
 #[test]
-#[ignore = "codegen bug: [u8; 20] parsed as FixedArray(Uint(8), 20) not Address"]
 fn encode_decode_struct_with_vec_field() {
     #[derive(Clone, Debug, PartialEq, Eq, SolType)]
     struct TokenList {
-        // owner: Address,
-        owner: [u8; 20],
+        owner: Address,
         amounts: Vec<U256>,
     }
 
     let val = TokenList {
-        // owner: Address([0xAB; 20]),
-        owner: [0xAB; 20],
+        owner: Address([0xAB; 20]),
         amounts: vec![U256::from(100u64), U256::from(200u64)],
     };
     let alloy = (
@@ -1184,9 +1180,10 @@ fn head_size_matches_encode_len_for_static_types() {
     assert_eq!(<u128 as SolEncode>::HEAD_SIZE, 32);
     assert_eq!(<U256 as SolEncode>::HEAD_SIZE, 32);
     assert_eq!(<bool as SolEncode>::HEAD_SIZE, 32);
-    assert_eq!(<[u8; 20] as SolEncode>::HEAD_SIZE, 32);
-    assert_eq!(<[u8; 32] as SolEncode>::HEAD_SIZE, 32);
     assert_eq!(<Address as SolEncode>::HEAD_SIZE, 32);
+    assert_eq!(<[u8; 32] as SolEncode>::HEAD_SIZE, 32);
+    assert_eq!(<[u8; 20] as SolEncode>::HEAD_SIZE, 32);
+    assert_eq!(<[u64; 3] as SolEncode>::HEAD_SIZE, 3 * 32);
 }
 
 #[test]
@@ -1196,8 +1193,8 @@ fn is_dynamic_flag_correct() {
     const { assert!(!<u64 as SolEncode>::IS_DYNAMIC) };
     const { assert!(!<U256 as SolEncode>::IS_DYNAMIC) };
     const { assert!(!<bool as SolEncode>::IS_DYNAMIC) };
-    const { assert!(!<[u8; 20] as SolEncode>::IS_DYNAMIC) };
     const { assert!(!<Address as SolEncode>::IS_DYNAMIC) };
+    const { assert!(!<[u8; 32] as SolEncode>::IS_DYNAMIC) };
 
     // Dynamic types
     const { assert!(<alloc::string::String as SolEncode>::IS_DYNAMIC) };
@@ -1243,7 +1240,7 @@ fn encode_decode_bytes32_zero() {
 
 #[test]
 fn encode_decode_bytes32_max() {
-    let val = [0xFF; 32];
+    let val = [0xFF_u8; 32];
     let alloy = FixedBytes::from(val).abi_encode();
     let mut buf = vec![0u8; 32];
     val.encode_to(&mut buf);

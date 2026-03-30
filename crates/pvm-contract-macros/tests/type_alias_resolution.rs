@@ -67,6 +67,23 @@ struct MixedStruct {
     origin: Point,
 }
 
+#[derive(Debug, PartialEq, Eq, SolType)]
+struct NamedPoint {
+    point: Point,
+    name: String,
+}
+
+#[derive(Debug, PartialEq, Eq, SolType)]
+struct ArrayAndDynamicCustom {
+    points: [Point; 2],
+    label: String,
+}
+
+#[derive(Debug, PartialEq, Eq, SolType)]
+struct TupleCustomDynamic {
+    pair: (Point, String),
+}
+
 // ========================================================================
 // encode_len tests — these catch the head_size=0 bug for Custom types
 // ========================================================================
@@ -204,6 +221,44 @@ fn mixed_struct_roundtrip() {
     let mut buf = vec![0u8; len];
     s.encode_to(&mut buf);
     let decoded = MixedStruct::decode(&buf);
+    assert_eq!(decoded, s);
+}
+
+#[test]
+fn named_point_roundtrip() {
+    let s = NamedPoint {
+        point: Point { x: 11, y: 22 },
+        name: "alice".to_string(),
+    };
+    let len = s.encode_len();
+    let mut buf = vec![0u8; len];
+    s.encode_to(&mut buf);
+    let decoded = NamedPoint::decode(&buf);
+    assert_eq!(decoded, s);
+}
+
+#[test]
+fn dynamic_and_custom_array_roundtrip() {
+    let s = ArrayAndDynamicCustom {
+        points: [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }],
+        label: "polyline".to_string(),
+    };
+    let len = s.encode_len();
+    let mut buf = vec![0u8; len];
+    s.encode_to(&mut buf);
+    let decoded = ArrayAndDynamicCustom::decode(&buf);
+    assert_eq!(decoded, s);
+}
+
+#[test]
+fn dynamic_tuple_with_custom_roundtrip() {
+    let s = TupleCustomDynamic {
+        pair: (Point { x: 9, y: 10 }, "origin".to_string()),
+    };
+    let len = s.encode_len();
+    let mut buf = vec![0u8; len];
+    s.encode_to(&mut buf);
+    let decoded = TupleCustomDynamic::decode(&buf);
     assert_eq!(decoded, s);
 }
 
@@ -350,6 +405,27 @@ mod sol_name_tests {
         assert_eq!(
             <MixedStruct as SolEncode>::SOL_NAME,
             "(uint32,uint64,(uint64,uint64))"
+        );
+    }
+
+    #[test]
+    fn named_point_sol_name() {
+        assert_eq!(<NamedPoint as SolEncode>::SOL_NAME, "((uint64,uint64),string)");
+    }
+
+    #[test]
+    fn array_and_dynamic_custom_sol_name() {
+        assert_eq!(
+            <ArrayAndDynamicCustom as SolEncode>::SOL_NAME,
+            "((uint64,uint64)[2],string)"
+        );
+    }
+
+    #[test]
+    fn tuple_custom_dynamic_sol_name() {
+        assert_eq!(
+            <TupleCustomDynamic as SolEncode>::SOL_NAME,
+            "(((uint64,uint64),string))"
         );
     }
 }

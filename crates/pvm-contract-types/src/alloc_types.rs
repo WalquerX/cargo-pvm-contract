@@ -44,6 +44,8 @@ impl SolEncode for alloc::string::String {
     }
 }
 
+impl crate::SolArrayElement for alloc::string::String {}
+
 impl SolDecode for alloc::string::String {
     fn decode_at(input: &[u8], offset: usize) -> Self {
         let data_offset =
@@ -115,6 +117,8 @@ impl<T: SolEncode> SolEncode for alloc::vec::Vec<T> {
         }
     }
 }
+
+impl<T: SolEncode> crate::SolArrayElement for alloc::vec::Vec<T> {}
 
 impl<T: SolDecode> SolDecode for alloc::vec::Vec<T> {
     fn decode_at(input: &[u8], offset: usize) -> Self {

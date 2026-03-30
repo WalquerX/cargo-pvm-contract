@@ -109,6 +109,10 @@ impl SolType {
             && let Ok(size) = lit_int.base10_parse::<usize>()
         {
             let inner = Self::from_rust_type(&array.elem)?;
+            // [u8; N] encodes as Solidity bytesN (matching alloy behavior)
+            if inner == SolType::Uint(8) {
+                return Some(SolType::Bytes(size));
+            }
             return Some(SolType::FixedArray(Box::new(inner), size));
         }
 
@@ -129,7 +133,6 @@ impl SolType {
             | "::pvm_contract_types::Address"
             | "pvm_contract::Address"
             | "::pvm_contract::Address" => Some(SolType::Address),
-            "[u8;20]" => Some(SolType::Address),
             "U256" | "ruint::aliases::U256" => Some(SolType::Uint(256)),
             "u256" => Some(SolType::Uint(256)),
             "u128" => Some(SolType::Uint(128)),
@@ -143,7 +146,6 @@ impl SolType {
             "i16" => Some(SolType::Int(16)),
             "i8" => Some(SolType::Int(8)),
             "bool" => Some(SolType::Bool),
-            "[u8;32]" => Some(SolType::Bytes(32)),
             "String" | "alloc::string::String" => Some(SolType::String),
             _ => Some(SolType::Custom(type_str)),
         }
