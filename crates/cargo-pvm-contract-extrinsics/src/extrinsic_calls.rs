@@ -82,7 +82,7 @@ pub struct InstantiateWithCode {
     storage_deposit_limit: u128,
     code: Vec<u8>,
     data: Vec<u8>,
-    salt: Option<Vec<u8>>,
+    salt: Option<[u8; 32]>,
 }
 
 impl InstantiateWithCode {
@@ -92,7 +92,7 @@ impl InstantiateWithCode {
         storage_deposit_limit: u128,
         code: Vec<u8>,
         data: Vec<u8>,
-        salt: Option<Vec<u8>>,
+        salt: Option<[u8; 32]>,
     ) -> Self {
         Self {
             value,

@@ -14,7 +14,6 @@ serde_json.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
-colored = "3.0"
 rust_decimal = "1.37"
 
 scale = { package = "parity-scale-codec", version = "3.6", features = ["derive"] }

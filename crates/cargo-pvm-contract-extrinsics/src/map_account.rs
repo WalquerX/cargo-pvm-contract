@@ -90,7 +90,7 @@ where
             address: AccountIdMapper::to_address(
                 &account_id.encode()[..]
                     .try_into()
-                    .expect("AccountId32 is 32 bytes"),
+                    .map_err(|_| anyhow::anyhow!("AccountId must be 32 bytes"))?,
             ),
         })
     }

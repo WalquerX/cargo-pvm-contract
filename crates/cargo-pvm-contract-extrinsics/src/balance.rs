@@ -59,6 +59,11 @@ impl TokenMetadata {
             .get("tokenDecimals")
             .unwrap_or(&default_decimals)
             .as_u64()
+            .or_else(|| {
+                sys_props
+                    .get("tokenDecimals")
+                    .and_then(|v| v.as_array()?.first()?.as_u64())
+            })
             .context("error converting decimal to u64")? as usize;
         let symbol = sys_props
             .get("tokenSymbol")
@@ -211,6 +216,13 @@ where
                     if (micro_zeros + 1..=milli_zeros).contains(&number_of_digits) {
                         zeros = micro_zeros;
                         unit = UnitPrefix::Micro;
+                    } else if let Some(nano_zeros) = nano_units_zeros {
+                        if (nano_zeros + 1..=micro_zeros).contains(&number_of_digits) {
+                            zeros = nano_zeros;
+                            unit = UnitPrefix::Nano;
+                        } else {
+                            return Err(anyhow!("Invalid denomination"));
+                        }
                     } else {
                         return Err(anyhow!("Invalid denomination"));
                     }

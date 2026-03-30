@@ -71,7 +71,8 @@ where
                 addr,
                 fallback
             );
-            let account_id = <C as Config>::AccountId::decode(&mut &fallback[..]).unwrap();
+            let account_id = <C as Config>::AccountId::decode(&mut &fallback[..])
+                .map_err(|err| anyhow!("AccountId from fallback deserialization error: {err}"))?;
             Ok(account_id)
         }
         Some(raw_value) => {

@@ -199,7 +199,7 @@ where
             storage_deposit_limit,
             code,
             self.args.data.clone(),
-            self.args.salt.map(Into::into),
+            self.args.salt,
         )
         .build();
 
