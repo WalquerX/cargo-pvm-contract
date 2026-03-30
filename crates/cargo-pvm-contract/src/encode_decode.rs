@@ -77,14 +77,42 @@ fn canonical_type(input: &Value) -> Result<String> {
     }
 }
 
-/// Find a function entry in the ABI by name.
-fn find_function<'a>(abi: &'a [Value], function_name: &str) -> Result<&'a Value> {
-    abi.iter()
-        .find(|entry| {
-            entry["type"].as_str() == Some("function")
-                && entry["name"].as_str() == Some(function_name)
-        })
-        .ok_or_else(|| anyhow!("Function '{}' not found in ABI", function_name))
+/// Find a function entry in the ABI by name or full signature.
+///
+/// Accepts either a bare name (`"transfer"`) or a full signature
+/// (`"transfer(address,uint256)"`). When a bare name matches multiple
+/// overloads, returns an error asking for the full signature.
+fn find_function<'a>(abi: &'a [Value], function_id: &str) -> Result<&'a Value> {
+    if function_id.contains('(') {
+        // Full signature lookup
+        abi.iter()
+            .find(|entry| {
+                entry["type"].as_str() == Some("function")
+                    && build_function_signature(entry)
+                        .map(|sig| sig == function_id)
+                        .unwrap_or(false)
+            })
+            .ok_or_else(|| anyhow!("Function signature '{}' not found in ABI", function_id))
+    } else {
+        // Name-only lookup — error on ambiguous overloads
+        let matches: Vec<&Value> = abi
+            .iter()
+            .filter(|entry| {
+                entry["type"].as_str() == Some("function")
+                    && entry["name"].as_str() == Some(function_id)
+            })
+            .collect();
+
+        match matches.len() {
+            0 => Err(anyhow!("Function '{}' not found in ABI", function_id)),
+            1 => Ok(matches[0]),
+            _ => Err(anyhow!(
+                "Function '{}' is overloaded in the ABI. Specify the full signature, e.g. '{}(type1,type2,...)'.",
+                function_id,
+                function_id
+            )),
+        }
+    }
 }
 
 /// Find a constructor entry in the ABI.
@@ -100,14 +128,25 @@ fn abi_to_dyn_sol_type(input: &Value) -> Result<DynSolType> {
         .as_str()
         .ok_or_else(|| anyhow!("Input missing 'type'"))?;
 
-    // Array types first (e.g. "uint256[]", "tuple[]")
-    if let Some(base) = sol_type.strip_suffix("[]") {
+    // Fixed-size array types (e.g. "uint256[3]", "address[5]")
+    if let Some(bracket_pos) = sol_type.rfind('[') {
+        let inner_part = &sol_type[bracket_pos + 1..sol_type.len() - 1];
+        let base = &sol_type[..bracket_pos];
         let mut base_input = serde_json::json!({"type": base});
         if let Some(comps) = input["components"].as_array() {
             base_input["components"] = Value::Array(comps.clone());
         }
         let inner = abi_to_dyn_sol_type(&base_input)?;
-        return Ok(DynSolType::Array(Box::new(inner)));
+        if inner_part.is_empty() {
+            // Dynamic array (e.g. "uint256[]")
+            return Ok(DynSolType::Array(Box::new(inner)));
+        } else {
+            // Fixed-size array (e.g. "uint256[3]")
+            let size: usize = inner_part
+                .parse()
+                .map_err(|_| anyhow!("Invalid array size in '{sol_type}'"))?;
+            return Ok(DynSolType::FixedArray(Box::new(inner), size));
+        }
     }
 
     match sol_type {

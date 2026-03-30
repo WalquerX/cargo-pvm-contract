@@ -7,7 +7,7 @@ use sp_core::H160;
 use subxt_signer::sr25519::Keypair;
 
 use crate::{
-    AccountArgs, CallArgs, ExtrinsicArgs, InfoArgs, InstantiateArgs_, MapAccountArgs, RemoveArgs,
+    AccountArgs, CallArgs, CliInstantiateArgs, ExtrinsicArgs, InfoArgs, MapAccountArgs, RemoveArgs,
     RpcArgs, UploadArgs,
 };
 
@@ -15,18 +15,10 @@ type Conf = subxt::config::SubstrateConfig;
 type Signer = Keypair;
 
 fn parse_signer(suri: &str) -> Result<Signer> {
-    use subxt_signer::sr25519::dev;
-    match suri {
-        "//Alice" | "//alice" => Ok(dev::alice()),
-        "//Bob" | "//bob" => Ok(dev::bob()),
-        "//Charlie" | "//charlie" => Ok(dev::charlie()),
-        "//Dave" | "//dave" => Ok(dev::dave()),
-        "//Eve" | "//eve" => Ok(dev::eve()),
-        "//Ferdie" | "//ferdie" => Ok(dev::ferdie()),
-        _ => anyhow::bail!(
-            "Unsupported suri: {suri}. Supported: //Alice, //Bob, //Charlie, //Dave, //Eve, //Ferdie"
-        ),
-    }
+    use std::str::FromStr;
+    let uri = subxt_signer::SecretUri::from_str(suri)
+        .map_err(|e| anyhow::anyhow!("Invalid SURI '{suri}': {e}"))?;
+    Keypair::from_uri(&uri).map_err(|e| anyhow::anyhow!("Failed to create keypair from '{suri}': {e}"))
 }
 
 fn build_opts(
@@ -79,7 +71,7 @@ pub fn upload_command(args: UploadArgs) -> Result<()> {
     })
 }
 
-pub fn instantiate_command(args: InstantiateArgs_) -> Result<()> {
+pub fn instantiate_command(args: CliInstantiateArgs) -> Result<()> {
     let code_bytes = std::fs::read(&args.code)
         .with_context(|| format!("Failed to read contract binary: {}", args.code.display()))?;
     let data = match &args.data {

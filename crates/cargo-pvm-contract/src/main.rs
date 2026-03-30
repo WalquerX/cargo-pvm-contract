@@ -42,7 +42,7 @@ enum PvmContractCommand {
     /// Upload contract code to the chain
     Upload(UploadArgs),
     /// Instantiate a contract (upload + deploy in one step)
-    Instantiate(InstantiateArgs_),
+    Instantiate(CliInstantiateArgs),
     /// Call an existing contract
     Call(CallArgs),
     /// Remove uploaded contract code
@@ -126,7 +126,7 @@ struct UploadArgs {
 }
 
 #[derive(Args, Debug)]
-struct InstantiateArgs_ {
+struct CliInstantiateArgs {
     /// Path to the .polkavm contract binary
     #[arg(long)]
     code: PathBuf,

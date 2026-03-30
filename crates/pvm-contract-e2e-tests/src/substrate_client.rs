@@ -277,8 +277,24 @@ fn cargo_pvm_contract_bin() -> std::path::PathBuf {
 }
 
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    let hex = hex.trim();
+    assert!(
+        hex.len().is_multiple_of(2),
+        "hex_to_bytes: hex string must have even length, got {}: {:?}",
+        hex.len(),
+        hex
+    );
     (0..hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex"))
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or_else(|e| {
+                panic!(
+                    "hex_to_bytes: invalid hex at byte index {} (\"{}\"): {}",
+                    i,
+                    &hex[i..i + 2],
+                    e
+                )
+            })
+        })
         .collect()
 }

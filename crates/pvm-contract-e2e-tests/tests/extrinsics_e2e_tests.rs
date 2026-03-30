@@ -273,6 +273,33 @@ async fn fetch_all_contracts_includes_deployed() {
 }
 
 #[tokio::test]
+async fn instantiate_from_existing_code_hash() {
+    let (_node, client) = start_and_client();
+    let alice = SubstrateClient::alice();
+    let (bytecode, _) = build_mytoken();
+
+    // 1. Upload code only
+    client.upload_code(&bytecode, &alice).await.expect("upload");
+
+    // 2. Instantiate from the existing code hash (not re-uploading)
+    let code_hash =
+        subxt::utils::H256::from(cargo_pvm_contract_extrinsics::ContractBinary(bytecode).code_hash());
+    let deploy = client
+        .instantiate(Code::Existing(code_hash), vec![], &alice)
+        .await
+        .expect("instantiate from existing code hash");
+
+    // 3. Verify the contract has been deployed
+    assert_ne!(deploy.contract_address, sp_core::H160::zero());
+
+    let info = client
+        .fetch_contract_info(&deploy.contract_address)
+        .await
+        .expect("fetch_contract_info");
+    assert_eq!(*info.code_hash(), code_hash);
+}
+
+#[tokio::test]
 async fn rpc_system_chain_returns_value() {
     let (_node, client) = start_and_client();
 
