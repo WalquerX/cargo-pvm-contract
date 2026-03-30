@@ -483,7 +483,11 @@ impl<T: SolArrayElement, const N: usize> SolEncode for [T; N] {
         }
         H::<T, N>::V.as_str()
     };
-    const HEAD_SIZE: usize = if T::IS_DYNAMIC { 32 * N } else { T::HEAD_SIZE * N };
+    const HEAD_SIZE: usize = if T::IS_DYNAMIC {
+        32 * N
+    } else {
+        T::HEAD_SIZE * N
+    };
 
     fn encode_len(&self) -> usize {
         if T::IS_DYNAMIC {
@@ -523,9 +527,8 @@ impl<T: SolArrayElement + SolDecode, const N: usize> SolDecode for [T; N] {
         core::array::from_fn(|i| {
             if T::IS_DYNAMIC {
                 let ho = offset + i * 32;
-                let field_offset = u64::from_be_bytes(
-                    input[ho + 24..ho + 32].try_into().unwrap(),
-                ) as usize;
+                let field_offset =
+                    u64::from_be_bytes(input[ho + 24..ho + 32].try_into().unwrap()) as usize;
                 T::decode_tail(input, offset + field_offset)
             } else {
                 T::decode_at(input, offset + i * T::HEAD_SIZE)

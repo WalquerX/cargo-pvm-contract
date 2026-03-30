@@ -72,28 +72,24 @@ pub fn generate_encode(ty: &SolType, value_expr: TokenStream, use_alloc: bool) -
         SolType::DynBytes | SolType::String | SolType::Array(_) => {
             panic!("Dynamic types require special handling in tuple encoding");
         }
-        SolType::Custom(name) => {
-            match syn::parse_str::<syn::Path>(name) {
-                Ok(type_path) => {
-                    quote! {
-                        {
-                            let mut __buf = [0u8; <#type_path as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
-                            <#type_path as ::pvm_contract_types::SolEncode>::encode_to(&#value_expr, &mut __buf);
-                            __buf
-                        }
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                quote! {
+                    {
+                        let mut __buf = [0u8; <#type_path as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
+                        <#type_path as ::pvm_contract_types::SolEncode>::encode_to(&#value_expr, &mut __buf);
+                        __buf
                     }
                 }
-                Err(err) => {
-                    let msg = format!(
-                        "Invalid custom type path `{name}` in encode codegen: {err}"
-                    );
-                    quote! {{
-                        compile_error!(#msg);
-                        ::core::unreachable!()
-                    }}
-                }
             }
-        }
+            Err(err) => {
+                let msg = format!("Invalid custom type path `{name}` in encode codegen: {err}");
+                quote! {{
+                    compile_error!(#msg);
+                    ::core::unreachable!()
+                }}
+            }
+        },
         SolType::FixedArray(inner, size) => {
             let size_lit = *size;
             let elem_size = sol_type_head_size_expr(inner);

@@ -169,19 +169,16 @@ fn build_sol_signature(field_info: &[(Option<syn::Ident>, SolType)]) -> String {
 
 pub(crate) fn sol_type_name_parts(ty: &SolType, parts: &mut Vec<TokenStream>) {
     match ty {
-        SolType::Custom(name) => {
-            match syn::parse_str::<syn::Path>(name) {
-                Ok(type_path) => {
-                    parts.push(quote! { <#type_path as ::pvm_contract_types::SolEncode>::SOL_NAME });
-                }
-                Err(err) => {
-                    let msg = format!(
-                        "Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}"
-                    );
-                    parts.push(quote! { compile_error!(#msg) });
-                }
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                parts.push(quote! { <#type_path as ::pvm_contract_types::SolEncode>::SOL_NAME });
             }
-        }
+            Err(err) => {
+                let msg =
+                    format!("Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}");
+                parts.push(quote! { compile_error!(#msg) });
+            }
+        },
         SolType::Array(inner) if inner.has_custom_types() => {
             sol_type_name_parts(inner, parts);
             parts.push(quote! { "[]" });
@@ -210,22 +207,19 @@ pub(crate) fn sol_type_name_parts(ty: &SolType, parts: &mut Vec<TokenStream>) {
 
 pub(crate) fn sol_type_head_size_expr(ty: &SolType) -> TokenStream {
     match ty {
-        SolType::Custom(name) => {
-            match syn::parse_str::<syn::Path>(name) {
-                Ok(type_path) => {
-                    quote! { <#type_path as ::pvm_contract_types::SolEncode>::HEAD_SIZE }
-                }
-                Err(err) => {
-                    let msg = format!(
-                        "Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}"
-                    );
-                    quote! {{
-                        compile_error!(#msg);
-                        0usize
-                    }}
-                }
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                quote! { <#type_path as ::pvm_contract_types::SolEncode>::HEAD_SIZE }
             }
-        }
+            Err(err) => {
+                let msg =
+                    format!("Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}");
+                quote! {{
+                    compile_error!(#msg);
+                    0usize
+                }}
+            }
+        },
         SolType::FixedArray(inner, size) if inner.has_custom_types() => {
             let inner_size = sol_type_head_size_expr(inner);
             let size_lit = *size;
@@ -306,9 +300,7 @@ fn generate_static_encode_body_with_custom(
     let mut stmts = Vec::new();
     stmts.push(quote! { let mut __offset: usize = 0; });
 
-    for (i, ((field_name, _), field_ty)) in
-        field_info.iter().zip(field_types.iter()).enumerate()
-    {
+    for (i, ((field_name, _), field_ty)) in field_info.iter().zip(field_types.iter()).enumerate() {
         let field_access = match fields {
             Fields::Named(_) => {
                 let name = field_name.as_ref().unwrap();
@@ -910,7 +902,8 @@ mod tests {
             ),
         ];
         let expr = build_total_size_expr(&field_info);
-        let expected = quote! { 0 + 32usize + <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE };
+        let expected =
+            quote! { 0 + 32usize + <Count as ::pvm_contract_types::SolEncode>::HEAD_SIZE };
         assert_eq!(normalize_tokens(expr), normalize_tokens(expected));
     }
 

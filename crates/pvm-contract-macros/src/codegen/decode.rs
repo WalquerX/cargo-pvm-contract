@@ -30,7 +30,9 @@ pub fn generate_decode(
     let offset_lit = offset;
 
     match ty {
-        SolType::Address => generate_sol_decode(quote!(::pvm_contract_types::Address), &data_expr, offset),
+        SolType::Address => {
+            generate_sol_decode(quote!(::pvm_contract_types::Address), &data_expr, offset)
+        }
         SolType::Bool => generate_sol_decode(quote!(bool), &data_expr, offset),
         SolType::Uint(8) => generate_sol_decode(quote!(u8), &data_expr, offset),
         SolType::Uint(16) => generate_sol_decode(quote!(u16), &data_expr, offset),
@@ -156,24 +158,20 @@ pub fn generate_decode(
                 (#(#elem_decodes),*)
             }
         }
-        SolType::Custom(name) => {
-            match syn::parse_str::<syn::Path>(name) {
-                Ok(type_path) => {
-                    quote! {
-                    <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&#data_expr, #offset_lit)
-                    }
-                }
-                Err(err) => {
-                    let msg = format!(
-                        "Invalid custom type path `{name}` in decode codegen: {err}"
-                    );
-                    quote! {{
-                        compile_error!(#msg);
-                        ::core::unreachable!()
-                    }}
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                quote! {
+                <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&#data_expr, #offset_lit)
                 }
             }
-        }
+            Err(err) => {
+                let msg = format!("Invalid custom type path `{name}` in decode codegen: {err}");
+                quote! {{
+                    compile_error!(#msg);
+                    ::core::unreachable!()
+                }}
+            }
+        },
     }
 }
 
@@ -253,22 +251,18 @@ fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream 
             let size_lit = *size;
             generate_sol_decode_runtime(quote!([u8; #size_lit]))
         }
-        SolType::Custom(name) => {
-            match syn::parse_str::<syn::Path>(name) {
-                Ok(type_path) => {
-                    quote! { <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&input, __decode_offset) }
-                }
-                Err(err) => {
-                    let msg = format!(
-                        "Invalid custom type path `{name}` in decode codegen: {err}"
-                    );
-                    quote! {{
-                        compile_error!(#msg);
-                        ::core::unreachable!()
-                    }}
-                }
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                quote! { <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&input, __decode_offset) }
             }
-        }
+            Err(err) => {
+                let msg = format!("Invalid custom type path `{name}` in decode codegen: {err}");
+                quote! {{
+                    compile_error!(#msg);
+                    ::core::unreachable!()
+                }}
+            }
+        },
         _ => generate_decode(ty, quote!(&input[__decode_offset..]), 0, use_alloc),
     }
 }

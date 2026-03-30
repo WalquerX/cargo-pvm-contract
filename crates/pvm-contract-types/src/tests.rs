@@ -625,7 +625,10 @@ fn encode_decode_tuple_string_string() {
     let mut buf = vec![0u8; val.encode_len()];
     val.encode_to(&mut buf);
     assert_eq!(&buf, &alloy[32..]);
-    assert_eq!(<(alloc::string::String, alloc::string::String)>::decode(&buf), val);
+    assert_eq!(
+        <(alloc::string::String, alloc::string::String)>::decode(&buf),
+        val
+    );
 }
 
 #[test]
@@ -661,7 +664,9 @@ fn encode_decode_fixed_array_of_strings() {
         items: [alloc::string::String; 2],
     }
 
-    let val = TwoNames { items: ["alpha".to_string(), "beta".to_string()] };
+    let val = TwoNames {
+        items: ["alpha".to_string(), "beta".to_string()],
+    };
     let alloy = (["alpha".to_string(), "beta".to_string()],).abi_encode();
     let mut buf = vec![0u8; val.encode_len()];
     val.encode_to(&mut buf);

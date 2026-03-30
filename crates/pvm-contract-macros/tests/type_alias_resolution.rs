@@ -410,7 +410,10 @@ mod sol_name_tests {
 
     #[test]
     fn named_point_sol_name() {
-        assert_eq!(<NamedPoint as SolEncode>::SOL_NAME, "((uint64,uint64),string)");
+        assert_eq!(
+            <NamedPoint as SolEncode>::SOL_NAME,
+            "((uint64,uint64),string)"
+        );
     }
 
     #[test]
