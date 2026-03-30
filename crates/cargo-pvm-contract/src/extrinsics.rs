@@ -18,7 +18,8 @@ fn parse_signer(suri: &str) -> Result<Signer> {
     use std::str::FromStr;
     let uri = subxt_signer::SecretUri::from_str(suri)
         .map_err(|e| anyhow::anyhow!("Invalid SURI '{suri}': {e}"))?;
-    Keypair::from_uri(&uri).map_err(|e| anyhow::anyhow!("Failed to create keypair from '{suri}': {e}"))
+    Keypair::from_uri(&uri)
+        .map_err(|e| anyhow::anyhow!("Failed to create keypair from '{suri}': {e}"))
 }
 
 fn build_opts(

@@ -282,8 +282,9 @@ async fn instantiate_from_existing_code_hash() {
     client.upload_code(&bytecode, &alice).await.expect("upload");
 
     // 2. Instantiate from the existing code hash (not re-uploading)
-    let code_hash =
-        subxt::utils::H256::from(cargo_pvm_contract_extrinsics::ContractBinary(bytecode).code_hash());
+    let code_hash = subxt::utils::H256::from(
+        cargo_pvm_contract_extrinsics::ContractBinary(bytecode).code_hash(),
+    );
     let deploy = client
         .instantiate(Code::Existing(code_hash), vec![], &alice)
         .await
