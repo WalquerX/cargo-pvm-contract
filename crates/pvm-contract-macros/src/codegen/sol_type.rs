@@ -238,6 +238,35 @@ pub(crate) fn sol_type_head_size_expr(ty: &SolType) -> TokenStream {
     }
 }
 
+pub(crate) fn sol_type_is_dynamic_expr(ty: &SolType) -> TokenStream {
+    match ty {
+        SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
+            Ok(type_path) => {
+                quote! { <#type_path as ::pvm_contract_types::SolEncode>::IS_DYNAMIC }
+            }
+            Err(err) => {
+                let msg =
+                    format!("Invalid custom type path `{name}` in `#[derive(SolType)]`: {err}");
+                quote! {{
+                    compile_error!(#msg);
+                    false
+                }}
+            }
+        },
+        SolType::FixedArray(inner, _) if inner.has_custom_types() => {
+            sol_type_is_dynamic_expr(inner)
+        }
+        SolType::Tuple(types) if types.iter().any(|t| t.has_custom_types()) => {
+            let parts: Vec<TokenStream> = types.iter().map(sol_type_is_dynamic_expr).collect();
+            quote! { (false #(|| #parts)*) }
+        }
+        _ => {
+            let is_dyn = ty.is_dynamic().unwrap_or(false);
+            quote! { #is_dyn }
+        }
+    }
+}
+
 fn build_sol_name_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStream {
     let has_custom = field_info.iter().any(|(_, t)| t.has_custom_types());
 
@@ -333,7 +362,6 @@ fn generate_encode_stmt_runtime(
     });
 }
 
-/// Generate decode body for static structs with Custom-type fields.
 /// Generate decode body for static structs with Custom-type fields.
 /// Uses a running offset variable and trait-based decode_at calls.
 fn generate_static_decode_body_with_custom(

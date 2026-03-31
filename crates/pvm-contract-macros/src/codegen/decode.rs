@@ -77,14 +77,14 @@ pub fn generate_decode(
         SolType::DynBytes => {
             if use_alloc {
                 quote! {{
-                    let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
-                    let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
+                    let dyn_offset = u64::from_be_bytes(#data_expr[#offset_lit + 24..#offset_lit + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(#data_expr[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
                     #data_expr[dyn_offset + 32..dyn_offset + 32 + length].to_vec()
                 }}
             } else {
                 quote! {{
-                    let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
-                    let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
+                    let dyn_offset = u64::from_be_bytes(#data_expr[#offset_lit + 24..#offset_lit + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(#data_expr[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
                     &#data_expr[dyn_offset + 32..dyn_offset + 32 + length]
                 }}
             }
@@ -92,15 +92,15 @@ pub fn generate_decode(
         SolType::String => {
             if use_alloc {
                 quote! {{
-                    let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
-                    let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
+                    let dyn_offset = u64::from_be_bytes(#data_expr[#offset_lit + 24..#offset_lit + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(#data_expr[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
                     let bytes = &#data_expr[dyn_offset + 32..dyn_offset + 32 + length];
                     alloc::string::String::from_utf8_lossy(bytes).into_owned()
                 }}
             } else {
                 quote! {{
-                    let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
-                    let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
+                    let dyn_offset = u64::from_be_bytes(#data_expr[#offset_lit + 24..#offset_lit + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(#data_expr[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
                     let bytes = &#data_expr[dyn_offset + 32..dyn_offset + 32 + length];
                     core::str::from_utf8(bytes).unwrap_or("")
                 }}
@@ -110,16 +110,15 @@ pub fn generate_decode(
             if use_alloc {
                 let inner_decode =
                     generate_decode_array_element(inner, quote!(elem_data), use_alloc);
-                let elem_size = inner
-                    .head_size()
-                    .expect("Array decode called on unresolved custom element type");
+                let elem_size = sol_type_head_size_expr(inner);
                 quote! {{
-                    let dyn_offset = ruint::aliases::U256::from_be_slice(&#data_expr[#offset_lit..#offset_lit + 32]).as_limbs()[0] as usize;
-                    let length = ruint::aliases::U256::from_be_slice(&#data_expr[dyn_offset..dyn_offset + 32]).as_limbs()[0] as usize;
+                    let dyn_offset = u64::from_be_bytes(#data_expr[#offset_lit + 24..#offset_lit + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(#data_expr[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
                     let array_data = &#data_expr[dyn_offset + 32..];
+                    let __elem_size: usize = #elem_size;
                     let mut result = alloc::vec::Vec::with_capacity(length);
                     for i in 0..length {
-                        let elem_data = &array_data[i * #elem_size..];
+                        let elem_data = &array_data[i * __elem_size..];
                         result.push(#inner_decode);
                     }
                     result
@@ -129,33 +128,66 @@ pub fn generate_decode(
             }
         }
         SolType::FixedArray(inner, size) => {
-            let elem_size = inner
-                .head_size()
-                .expect("FixedArray decode called on unresolved custom element type");
-            let elem_decodes: Vec<_> = (0..*size)
-                .map(|i| {
-                    let elem_offset = offset + i * elem_size;
-                    generate_decode(inner, data_expr.clone(), elem_offset, use_alloc)
-                })
-                .collect();
-            quote! {
-                [#(#elem_decodes),*]
+            if inner.has_custom_types() {
+                let elem_size_expr = sol_type_head_size_expr(inner);
+                let indices: Vec<_> = (0..*size).collect();
+                let inner_decode =
+                    generate_decode_array_element(inner, quote!(__elem_data), use_alloc);
+                quote! {{
+                    let __es: usize = #elem_size_expr;
+                    [#({
+                        let __elem_data = &#data_expr[#offset_lit + #indices * __es..];
+                        #inner_decode
+                    }),*]
+                }}
+            } else {
+                let elem_size = inner.head_size().expect("FixedArray inner head_size");
+                let elem_decodes: Vec<_> = (0..*size)
+                    .map(|i| {
+                        let elem_offset = offset + i * elem_size;
+                        generate_decode(inner, data_expr.clone(), elem_offset, use_alloc)
+                    })
+                    .collect();
+                quote! {
+                    [#(#elem_decodes),*]
+                }
             }
         }
         SolType::Tuple(types) => {
-            let mut current_offset = offset;
-            let elem_decodes: Vec<_> = types
-                .iter()
-                .map(|t| {
-                    let decode = generate_decode(t, data_expr.clone(), current_offset, use_alloc);
-                    current_offset += t
-                        .head_size()
-                        .expect("Tuple decode called on unresolved custom element type");
-                    decode
-                })
-                .collect();
-            quote! {
-                (#(#elem_decodes),*)
+            let has_custom = types.iter().any(|t| t.has_custom_types());
+            if has_custom {
+                let elem_decodes: Vec<TokenStream> = types
+                    .iter()
+                    .map(|t| {
+                        let decode = generate_decode_runtime_offset(t, use_alloc);
+                        let size_increment = sol_type_head_size_expr(t);
+                        quote! {{
+                            let __value = #decode;
+                            __decode_offset += #size_increment;
+                            __value
+                        }}
+                    })
+                    .collect();
+                quote! {{
+                    let __base = #offset_lit;
+                    let mut __decode_offset: usize = __base;
+                    let input = &#data_expr;
+                    (#(#elem_decodes),*)
+                }}
+            } else {
+                let mut current_offset = offset;
+                let elem_decodes: Vec<_> = types
+                    .iter()
+                    .map(|t| {
+                        let decode =
+                            generate_decode(t, data_expr.clone(), current_offset, use_alloc);
+                        current_offset += t.head_size().expect("Tuple inner head_size");
+                        decode
+                    })
+                    .collect();
+                quote! {
+                    (#(#elem_decodes),*)
+                }
             }
         }
         SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
@@ -251,6 +283,59 @@ fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream 
             let size_lit = *size;
             generate_sol_decode_runtime(quote!([u8; #size_lit]))
         }
+        SolType::DynBytes => {
+            if use_alloc {
+                quote! {{
+                    let dyn_offset = u64::from_be_bytes(input[__decode_offset + 24..__decode_offset + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(input[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
+                    input[dyn_offset + 32..dyn_offset + 32 + length].to_vec()
+                }}
+            } else {
+                quote! {{
+                    let dyn_offset = u64::from_be_bytes(input[__decode_offset + 24..__decode_offset + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(input[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
+                    &input[dyn_offset + 32..dyn_offset + 32 + length]
+                }}
+            }
+        }
+        SolType::String => {
+            if use_alloc {
+                quote! {{
+                    let dyn_offset = u64::from_be_bytes(input[__decode_offset + 24..__decode_offset + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(input[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
+                    let bytes = &input[dyn_offset + 32..dyn_offset + 32 + length];
+                    alloc::string::String::from_utf8_lossy(bytes).into_owned()
+                }}
+            } else {
+                quote! {{
+                    let dyn_offset = u64::from_be_bytes(input[__decode_offset + 24..__decode_offset + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(input[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
+                    let bytes = &input[dyn_offset + 32..dyn_offset + 32 + length];
+                    core::str::from_utf8(bytes).unwrap_or("")
+                }}
+            }
+        }
+        SolType::Array(inner) => {
+            if use_alloc {
+                let inner_decode =
+                    generate_decode_array_element(inner, quote!(elem_data), use_alloc);
+                let elem_size = sol_type_head_size_expr(inner);
+                quote! {{
+                    let dyn_offset = u64::from_be_bytes(input[__decode_offset + 24..__decode_offset + 32].try_into().unwrap()) as usize;
+                    let length = u64::from_be_bytes(input[dyn_offset + 24..dyn_offset + 32].try_into().unwrap()) as usize;
+                    let array_data = &input[dyn_offset + 32..];
+                    let __elem_size: usize = #elem_size;
+                    let mut result = alloc::vec::Vec::with_capacity(length);
+                    for i in 0..length {
+                        let elem_data = &array_data[i * __elem_size..];
+                        result.push(#inner_decode);
+                    }
+                    result
+                }}
+            } else {
+                panic!("Dynamic arrays require an explicit allocator");
+            }
+        }
         SolType::Custom(name) => match syn::parse_str::<syn::Path>(name) {
             Ok(type_path) => {
                 quote! { <#type_path as ::pvm_contract_types::SolDecode>::decode_at(&input, __decode_offset) }
@@ -263,7 +348,36 @@ fn generate_decode_runtime_offset(ty: &SolType, use_alloc: bool) -> TokenStream 
                 }}
             }
         },
-        _ => generate_decode(ty, quote!(&input[__decode_offset..]), 0, use_alloc),
+        SolType::FixedArray(inner, size) => {
+            let elem_size_expr = sol_type_head_size_expr(inner);
+            let indices: Vec<_> = (0..*size).collect();
+            let inner_decode =
+                generate_decode_array_element(inner, quote!(__fa_elem_data), use_alloc);
+            quote! {{
+                let __fa_es: usize = #elem_size_expr;
+                [#({
+                    let __fa_elem_data = &input[__decode_offset + #indices * __fa_es..];
+                    #inner_decode
+                }),*]
+            }}
+        }
+        SolType::Tuple(types) => {
+            let elem_decodes: Vec<TokenStream> = types
+                .iter()
+                .map(|t| {
+                    let decode = generate_decode_runtime_offset(t, use_alloc);
+                    let size_increment = sol_type_head_size_expr(t);
+                    quote! {{
+                        let __value = #decode;
+                        __decode_offset += #size_increment;
+                        __value
+                    }}
+                })
+                .collect();
+            quote! {{
+                (#(#elem_decodes),*)
+            }}
+        }
     }
 }
 

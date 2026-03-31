@@ -593,6 +593,23 @@ fn encode_decode_tuple_with_struct() {
     assert_eq!(<(Point, u32)>::decode(&buf), val);
 }
 
+#[test]
+fn encode_decode_tuple_struct_and_string() {
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct Point {
+        x: u64,
+        y: u64,
+    }
+
+    let val = (Point { x: 7, y: 13 }, "hello world".to_string());
+    let alloy = ((7u64, 13u64), "hello world".to_string()).abi_encode();
+    let mut buf = vec![0u8; val.encode_len()];
+    val.encode_to(&mut buf);
+    // alloy wraps dynamic tuples with a top-level offset prefix
+    assert_eq!(&buf, &alloy[32..]);
+    assert_eq!(<(Point, alloc::string::String)>::decode(&buf), val);
+}
+
 // ========================================================================
 // Dynamic tuples — structs with mixed static/dynamic fields
 // ========================================================================
@@ -1206,6 +1223,38 @@ fn is_dynamic_flag_correct() {
     const { assert!(<&str as SolEncode>::IS_DYNAMIC) };
     const { assert!(<Vec<u64> as SolEncode>::IS_DYNAMIC) };
     const { assert!(<Vec<alloc::string::String> as SolEncode>::IS_DYNAMIC) };
+
+    // Custom structs (static)
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct StaticPair {
+        x: u64,
+        y: u64,
+    }
+    const { assert!(!<StaticPair as SolEncode>::IS_DYNAMIC) };
+
+    // Custom structs (dynamic)
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct DynamicRecord {
+        id: u64,
+        name: alloc::string::String,
+    }
+    const { assert!(<DynamicRecord as SolEncode>::IS_DYNAMIC) };
+
+    // Nested static struct
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct NestedStatic {
+        pair: StaticPair,
+        flag: bool,
+    }
+    const { assert!(!<NestedStatic as SolEncode>::IS_DYNAMIC) };
+
+    // Nested struct with dynamic inner
+    #[derive(Clone, Debug, PartialEq, Eq, SolType)]
+    struct NestedDynamic {
+        record: DynamicRecord,
+        count: u64,
+    }
+    const { assert!(<NestedDynamic as SolEncode>::IS_DYNAMIC) };
 }
 
 // ========================================================================
