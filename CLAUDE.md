@@ -350,4 +350,4 @@ specs/
 
 ## Documentation
 
-- The proc macro docs in `crates/pvm-contract-macros/src/lib.rs` contain `# Generated Code` examples. When changing codegen, update those examples to match the current generated output.
+- The proc macro doc comments in `crates/pvm-contract-macros/src/lib.rs` include `# Generated Code` sections showing what the macros expand to. When changing codegen, always update these examples to match the actual generated output.
