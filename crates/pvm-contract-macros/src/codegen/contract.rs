@@ -573,6 +573,7 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
 
     let call_fn = if use_alloc {
         quote! {
+            #[allow(non_upper_case_globals)]
             #[polkavm_derive::polkavm_export]
             pub extern "C" fn call() {
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
@@ -599,6 +600,7 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
     } else {
         let buffer_size = args.buffer_size;
         quote! {
+            #[allow(non_upper_case_globals)]
             #[polkavm_derive::polkavm_export]
             pub extern "C" fn call() {
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
