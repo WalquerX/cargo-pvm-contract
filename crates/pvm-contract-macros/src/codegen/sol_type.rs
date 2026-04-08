@@ -136,7 +136,7 @@ fn expand_dynamic_sol_type(
     })
 }
 
-fn build_is_dynamic_expr(
+pub(crate) fn build_is_dynamic_expr(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
 ) -> TokenStream {
@@ -289,7 +289,7 @@ fn build_sol_name_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStr
     quote! { ::pvm_contract_types::const_format::concatcp!(#(#parts),*) }
 }
 
-fn build_total_size_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStream {
+pub(crate) fn build_total_size_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenStream {
     let has_custom = field_info.iter().any(|(_, t)| t.has_custom_types());
 
     if !has_custom {
@@ -311,7 +311,7 @@ fn build_total_size_expr(field_info: &[(Option<syn::Ident>, SolType)]) -> TokenS
     quote! { 0 #(+ #size_exprs)* }
 }
 
-fn get_field_types(fields: &Fields) -> Vec<&Type> {
+pub(crate) fn get_field_types(fields: &Fields) -> Vec<&Type> {
     match fields {
         Fields::Named(named) => named.named.iter().map(|f| &f.ty).collect(),
         Fields::Unnamed(unnamed) => unnamed.unnamed.iter().map(|f| &f.ty).collect(),
@@ -321,7 +321,7 @@ fn get_field_types(fields: &Fields) -> Vec<&Type> {
 
 /// Generate encode body for static structs with Custom-type fields.
 /// Uses a running offset variable and trait-based encode_to calls.
-fn generate_static_encode_body_with_custom(
+pub(crate) fn generate_static_encode_body_with_custom(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
 ) -> TokenStream {
@@ -423,7 +423,7 @@ fn generate_decode_expr_runtime(field_ty: &Type) -> TokenStream {
 
 /// Compute the total head size expression for a dynamic struct.
 /// Each static field contributes its head_size; each dynamic field contributes 32 (offset slot).
-fn build_dynamic_head_size_expr(
+pub(crate) fn build_dynamic_head_size_expr(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
 ) -> TokenStream {
@@ -486,7 +486,7 @@ fn build_dynamic_head_sum_expr(
     quote! { (0 #(+ #parts)*) }
 }
 
-fn generate_dynamic_encode_len(
+pub(crate) fn generate_dynamic_encode_len(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
     head_size_expr: &TokenStream,
@@ -530,7 +530,7 @@ fn generate_dynamic_encode_len(
     }
 }
 
-fn generate_dynamic_encode_body(
+pub(crate) fn generate_dynamic_encode_body(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
     head_size_expr: &TokenStream,
@@ -605,7 +605,7 @@ fn generate_dynamic_encode_body(
     }
 }
 
-fn extract_field_info(fields: &Fields) -> syn::Result<Vec<(Option<syn::Ident>, SolType)>> {
+pub(crate) fn extract_field_info(fields: &Fields) -> syn::Result<Vec<(Option<syn::Ident>, SolType)>> {
     let mut result = Vec::new();
 
     match fields {
@@ -640,7 +640,7 @@ fn type_to_sol_type(ty: &Type) -> syn::Result<SolType> {
     })
 }
 
-fn generate_static_encode_body(
+pub(crate) fn generate_static_encode_body(
     fields: &Fields,
     field_info: &[(Option<syn::Ident>, SolType)],
 ) -> TokenStream {

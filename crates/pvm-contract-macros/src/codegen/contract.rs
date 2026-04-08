@@ -126,6 +126,8 @@ pub(super) struct ParsedContract {
     pub(super) constructor_returns_result: bool,
     pub(super) constructor_inputs: Vec<(Ident, SolType)>,
     pub(super) fallback_name: Option<Ident>,
+    /// Error types from `Result<T, E>` return types, for ABI generation.
+    pub(super) error_types: Vec<syn::Type>,
 }
 
 fn extract_method_rename(attrs: &[Attribute]) -> Option<String> {
@@ -179,6 +181,45 @@ fn is_result_return_type(output: &syn::ReturnType) -> bool {
             false
         }
     }
+}
+
+/// Collect the error type from a `Result<T, E>` return type, deduplicating by type name.
+fn collect_error_type(
+    output: &syn::ReturnType,
+    error_types: &mut Vec<syn::Type>,
+    seen: &mut Vec<String>,
+) {
+    if let Some(err_ty) = extract_error_type(output) {
+        let name = quote::quote!(#err_ty).to_string();
+        if !seen.contains(&name) {
+            seen.push(name);
+            error_types.push(err_ty);
+        }
+    }
+}
+
+/// Extract the error type `E` from a `Result<T, E>` return type.
+fn extract_error_type(output: &syn::ReturnType) -> Option<syn::Type> {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return None;
+    };
+    let syn::Type::Path(type_path) = ty.as_ref() else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    // Result<T, E> — E is the second generic argument
+    let mut iter = args.args.iter();
+    iter.next()?; // skip T
+    let syn::GenericArgument::Type(error_ty) = iter.next()? else {
+        return None;
+    };
+    Some(error_ty.clone())
 }
 
 fn to_camel_case(s: &str) -> String {
@@ -303,6 +344,8 @@ fn parse_contract(
     let mut constructor_inputs = Vec::new();
     let mut fallback_name = None;
     let mut implemented_sol_methods = Vec::new();
+    let mut error_types: Vec<syn::Type> = Vec::new();
+    let mut seen_error_names: Vec<String> = Vec::new();
 
     for item in &content.1 {
         if let syn::Item::Fn(func) = item {
@@ -311,9 +354,11 @@ fn parse_contract(
                 constructor_name = Some(func.sig.ident.clone());
                 constructor_returns_result = is_result_return_type(&func.sig.output);
                 constructor_inputs = extract_typed_params(&func.sig.inputs)?;
+                collect_error_type(&func.sig.output, &mut error_types, &mut seen_error_names);
             } else if has_pvm_attr(&func.attrs, "fallback") {
                 has_fallback = true;
                 fallback_name = Some(func.sig.ident.clone());
+                collect_error_type(&func.sig.output, &mut error_types, &mut seen_error_names);
             } else if has_pvm_attr(&func.attrs, "method") {
                 let param_names: Vec<Ident> = extract_typed_params(&func.sig.inputs)?
                     .into_iter()
@@ -355,6 +400,7 @@ fn parse_contract(
                     param_names,
                     returns_result,
                 });
+                collect_error_type(&func.sig.output, &mut error_types, &mut seen_error_names);
             }
         }
     }
@@ -387,6 +433,7 @@ fn parse_contract(
         constructor_returns_result,
         constructor_inputs,
         fallback_name,
+        error_types,
     })
 }
 
@@ -505,8 +552,13 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
-                    pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+                    {
+                        let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
+                        let mut __buf = [0u8; 256];
+                        let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
+                        pallet_revive_uapi::HostFnImpl::return_value(
+                            pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
+                    }
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
                 let input = &call_data[..call_data_len];
@@ -521,8 +573,10 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 match #call_expr {
                     Ok(()) => {}
                     Err(e) => {
+                        let mut __revert_buf = [0u8; 256];
+                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
                         pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
+                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
                     }
                 }
             }
@@ -559,8 +613,10 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
             match #mod_name::#fallback_name() {
                 Ok(()) => return,
                 Err(e) => {
+                    let mut __revert_buf = [0u8; 256];
+                    let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
                     pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
+                        pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
                 }
             }
         }
@@ -606,8 +662,13 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
-                    pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+                    {
+                        let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
+                        let mut __buf = [0u8; 256];
+                        let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
+                        pallet_revive_uapi::HostFnImpl::return_value(
+                            pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
+                    }
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 
@@ -686,6 +747,7 @@ fn strip_pvm_attrs(input: &ItemMod) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::{ContractArgs, expand_contract};
+    use syn::ItemMod;
 
     #[test]
     fn parses_no_alloc_with_nested_buffer() {
@@ -793,5 +855,40 @@ mod tests {
         // Should have match for Result error handling
         assert!(output.contains("Err (e)"));
         assert!(output.contains("REVERT"));
+    }
+
+    #[test]
+    fn error_paths_do_not_emit_raw_bytes() {
+        let item: ItemMod = syn::parse_str(
+            r#"
+            mod my_contract {
+                #[pvm_contract_macros::constructor]
+                pub fn new() -> Result<(), MyError> {
+                    Ok(())
+                }
+
+                #[pvm_contract_macros::method]
+                pub fn transfer(to: u64) -> Result<(), MyError> {
+                    Ok(())
+                }
+
+                #[pvm_contract_macros::fallback]
+                pub fn fallback() -> Result<(), MyError> {
+                    Ok(())
+                }
+            }
+        "#,
+        )
+        .unwrap();
+
+        let output = expand_contract(ContractArgs::default(), item)
+            .unwrap()
+            .to_string();
+
+        // Error paths must not use raw bytes (e.as_ref()) — regression guard
+        assert!(
+            !output.contains("as_ref"),
+            "Generated dispatch should not use as_ref for error encoding"
+        );
     }
 }

@@ -51,7 +51,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///     pub fn balance_of(_account: Address) -> U256 { U256::ZERO }
 ///
 ///     #[pvm_contract::method]
-///     pub fn transfer(to: Address, amount: U256) -> Result<(), Error> { Ok(()) }
+///     pub fn transfer(to: Address, amount: U256) -> Result<(), TokenError> { Ok(()) }
 ///
 ///     #[pvm_contract::fallback]
 ///     pub fn fallback() -> Result<(), Error> { Err(Error::UnknownSelector) }
@@ -79,7 +79,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///     pub fn balance_of(account: Address) -> U256 { U256::ZERO }
 ///
 ///     #[pvm_contract::method]
-///     pub fn transfer(to: Address, amount: U256) -> Result<(), Error> { Ok(()) }
+///     pub fn transfer(to: Address, amount: U256) -> Result<(), TokenError> { Ok(()) }
 ///
 ///     #[pvm_contract::fallback]
 ///     pub fn fallback() -> Result<(), Error> { Err(Error::UnknownSelector) }
@@ -124,22 +124,15 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///
 /// ```ignore
 /// mod my_token {
-///     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-///     pub enum Error {
-///         // Add your errors here:
-///         InsufficientBalance,
-///         Unauthorized,
-///     }
+///     #[derive(Debug, pvm_contract_macros::SolError)]
+///     pub struct InsufficientBalance;
 ///
-///     impl AsRef<[u8]> for Error {
-///         fn as_ref(&self) -> &[u8] {
-///             match self {
-///                 Self::InsufficientBalance => b"InsufficientBalance",
-///                 Self::Unauthorized => b"Unauthorized",
-///             }
+///     pvm_contract_types::sol_revert_enum! {
+///         pub enum TokenError {
+///             InsufficientBalance(InsufficientBalance),
 ///         }
 ///     }
-///     // ... methods
+///     // ... methods returning Result<T, TokenError>
 /// }
 /// ```
 ///
@@ -162,7 +155,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///
 ///     // Fallible method (returns Result)
 ///     #[pvm_contract::method]
-///     pub fn transfer(to: Address, amount: U256) -> Result<(), Error> { Ok(()) }
+///     pub fn transfer(to: Address, amount: U256) -> Result<(), TokenError> { Ok(()) }
 /// }
 ///
 /// // Generates:
@@ -172,8 +165,12 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///     let mut call_data = [0u8; 512];
 ///
 ///     if call_data_len > 512 {
+///         // ABI-encoded Error(string) revert
+///         let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
+///         let mut __buf = [0u8; 256];
+///         let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
 ///         pallet_revive_uapi::HostFnImpl::return_value(
-///             pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+///             pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
 ///     }
 ///     pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 ///
@@ -216,8 +213,10 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///             match my_token::transfer(::core::convert::Into::into(to), ::core::convert::Into::into(amount)) {
 ///                 Ok(()) => return,
 ///                 Err(e) => {
+///                     let mut __revert_buf = [0u8; 256];
+///                     let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
 ///                     pallet_revive_uapi::HostFnImpl::return_value(
-///                         pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
+///                         pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
 ///                 }
 ///             }
 ///         }
@@ -688,6 +687,40 @@ pub fn sol_type(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     match codegen::expand_sol_type(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Derive the [`SolError`] trait for a struct, enabling Solidity-compatible
+/// ABI-encoded revert data.
+///
+/// Generates `SELECTOR` (compile-time keccak256), `SIGNATURE`, and
+/// `encode_params` from the struct fields. Each field must implement
+/// [`SolEncode`].
+///
+/// # Example
+///
+/// ```ignore
+/// #[derive(SolError)]
+/// pub struct InsufficientBalance {
+///     pub account: Address,
+///     pub required: U256,
+///     pub available: U256,
+/// }
+/// ```
+///
+/// Zero-field errors are valid:
+///
+/// ```ignore
+/// #[derive(SolError)]
+/// pub struct Unauthorized;
+/// ```
+#[proc_macro_derive(SolError)]
+pub fn sol_error(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    match codegen::expand_sol_error(input) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }

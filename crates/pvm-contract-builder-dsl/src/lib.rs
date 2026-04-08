@@ -10,6 +10,22 @@ pub use ruint;
 /// 4-byte Solidity function selector.
 pub type Selector = [u8; 4];
 
+/// Revert execution with a structured ABI-encoded error.
+///
+/// Encodes the error via [`pvm_contract_types::SolRevert::revert_data`] and
+/// calls `return_value(REVERT, ...)`. Uses `SolRevert` as the bound so it
+/// works with both single [`pvm_contract_types::SolError`] types and error
+/// enums from [`pvm_contract_types::sol_revert_enum!`].
+///
+/// This is a convenience for DSL handlers. The `#[contract]` macro path
+/// handles error encoding automatically in the dispatch layer.
+pub fn revert_with<H: pallet_revive_uapi::HostFn, E: pvm_contract_types::SolRevert>(e: &E) -> ! {
+    let mut buf = [0u8; 256];
+    let len = e.revert_data(&mut buf);
+    H::return_value(pallet_revive_uapi::ReturnFlags::REVERT, &buf[..len]);
+    unreachable!()
+}
+
 /// A method handler receives the calldata bytes after the 4-byte selector.
 ///
 /// The handler is responsible for decoding inputs, executing logic, and calling
@@ -96,12 +112,12 @@ impl ContractBuilder {
 
         let mut buf = [0u8; BUF_SIZE];
         if call_data_len > BUF_SIZE {
-            H::return_value(ReturnFlags::REVERT, b"CalldataTooLarge");
+            revert_with::<H, _>(&pvm_contract_types::RevertString("CalldataTooLarge"));
         }
         H::call_data_copy(&mut buf[..call_data_len], 0);
 
         if call_data_len < 4 {
-            H::return_value(ReturnFlags::REVERT, b"NoSelector");
+            revert_with::<H, _>(&pvm_contract_types::RevertString("NoSelector"));
         }
 
         let selector: [u8; 4] = [buf[0], buf[1], buf[2], buf[3]];
@@ -117,6 +133,6 @@ impl ContractBuilder {
             i += 1;
         }
 
-        H::return_value(ReturnFlags::REVERT, b"UnknownSelector")
+        revert_with::<H, _>(&pvm_contract_types::RevertString("UnknownSelector"))
     }
 }

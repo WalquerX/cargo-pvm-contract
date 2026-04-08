@@ -80,17 +80,93 @@ fn generate_abi_gen_main_impl(parsed: &ParsedContract) -> syn::Result<TokenStrea
         .map(generate_method_entry)
         .collect::<syn::Result<Vec<_>>>()?;
 
+    // Emit error ABI entries by calling error_signatures() on each error type.
+    // This works for both single SolError types and sol_revert_enum! enums.
+    let error_entries: Vec<TokenStream> = parsed
+        .error_types
+        .iter()
+        .map(|err_ty| {
+            quote! {
+                for __sig in <#err_ty as ::pvm_contract_types::SolRevert>::error_signatures() {
+                    if __seen_errors.contains(__sig) {
+                        continue;
+                    }
+                    let Some(__paren) = __sig.find('(') else { continue; };
+                    if !__sig.ends_with(')') { continue; }
+                    __seen_errors.push(__sig);
+                    if !__first_item {
+                        __abi.push(',');
+                    } else {
+                        __first_item = false;
+                    }
+                    let __err_name = &__sig[..__paren];
+                    let __params_str = &__sig[__paren + 1..__sig.len() - 1];
+                    __abi.push_str("{\"type\":\"error\",\"name\":\"");
+                    __abi.push_str(__err_name);
+                    __abi.push_str("\",\"inputs\":[");
+                    if !__params_str.is_empty() {
+                        let mut __first_param = true;
+                        for __param_type in __split_params(__params_str) {
+                            if !__first_param {
+                                __abi.push(',');
+                            } else {
+                                __first_param = false;
+                            }
+                            __abi.push_str("{\"name\":\"\",\"type\":\"");
+                            __abi.push_str(__param_type);
+                            __abi.push_str("\"}");
+                        }
+                    }
+                    __abi.push_str("]}");
+                }
+            }
+        })
+        .collect();
+
+    let split_params_helper = if !parsed.error_types.is_empty() {
+        quote! {
+            /// Split a comma-separated parameter string respecting parenthesis nesting.
+            fn __split_params(s: &str) -> ::std::vec::Vec<&str> {
+                let mut params = ::std::vec::Vec::new();
+                let mut depth = 0usize;
+                let mut start = 0;
+                for (i, ch) in s.char_indices() {
+                    match ch {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        ',' if depth == 0 => {
+                            params.push(s[start..i].trim());
+                            start = i + 1;
+                        }
+                        _ => {}
+                    }
+                }
+                let last = s[start..].trim();
+                if !last.is_empty() {
+                    params.push(last);
+                }
+                params
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     Ok(quote! {
         #[cfg(feature = "abi-gen")]
         fn main() {
             #sol_encode_import
+            #split_params_helper
 
             let mut __abi = ::std::string::String::from("[");
             let mut __first_item = true;
+            let mut __seen_errors = ::std::vec::Vec::<&str>::new();
 
             #constructor_entry
 
             #(#method_entries)*
+
+            #(#error_entries)*
 
             __abi.push(']');
             ::std::println!("{}", __abi);
@@ -273,8 +349,39 @@ mod tests {
             constructor_returns_result: false,
             constructor_inputs: vec![],
             fallback_name: None,
+            error_types: vec![],
         };
 
         assert!(generate_abi_gen_main(&parsed, true).is_empty());
+    }
+
+    #[test]
+    fn error_types_appear_in_abi_gen_output() {
+        let parsed = ParsedContract {
+            mod_name: syn::parse_str("contract").unwrap(),
+            methods: vec![],
+            has_constructor: false,
+            has_fallback: false,
+            constructor_name: None,
+            constructor_returns_result: false,
+            constructor_inputs: vec![],
+            fallback_name: None,
+            error_types: vec![syn::parse_str("TokenError").unwrap()],
+        };
+
+        let output = generate_abi_gen_main(&parsed, false).to_string();
+
+        assert!(
+            output.contains("SolRevert"),
+            "Should reference SolRevert trait: {output}"
+        );
+        assert!(
+            output.contains("error_signatures"),
+            "Should call error_signatures(): {output}"
+        );
+        assert!(
+            output.contains(r#"\"type\":\"error\""#),
+            "Should emit error ABI entry: {output}"
+        );
     }
 }

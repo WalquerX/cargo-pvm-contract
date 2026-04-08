@@ -30,8 +30,13 @@ pub(super) fn generate_param_decoding(
     let size_check = if !sol_types.is_empty() {
         quote! {
             if input.len() < (#min_size_expr) {
-                pallet_revive_uapi::HostFnImpl::return_value(
-                    pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
+                {
+                    let __err = ::pvm_contract_types::RevertString("InvalidCalldata");
+                    let mut __buf = [0u8; 256];
+                    let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
+                }
             }
         }
     } else {
@@ -142,8 +147,10 @@ pub fn generate_dispatch_arm(
                 match #mod_name::#fn_name(#(#call_args),*) {
                     Ok(result) => { #encode_and_return }
                     Err(e) => {
+                        let mut __revert_buf = [0u8; 256];
+                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
                         pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
+                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
                     }
                 }
             }
@@ -152,8 +159,10 @@ pub fn generate_dispatch_arm(
                 match #mod_name::#fn_name(#(#call_args),*) {
                     Ok(()) => return,
                     Err(e) => {
+                        let mut __revert_buf = [0u8; 256];
+                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
                         pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, e.as_ref());
+                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
                     }
                 }
             }

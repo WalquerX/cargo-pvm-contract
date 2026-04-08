@@ -1,4 +1,5 @@
 use crate::signature::FunctionSignature;
+use crate::signature::SolType;
 
 #[derive(Debug, Clone)]
 pub struct SolFunction {
@@ -6,14 +7,29 @@ pub struct SolFunction {
     pub signature: FunctionSignature,
 }
 
+/// A parsed Solidity `error` declaration.
+///
+/// Example: `error InsufficientBalance(address account, uint256 required, uint256 available);`
+#[derive(Debug, Clone)]
+pub struct SolErrorDecl {
+    /// Error name (e.g. "InsufficientBalance")
+    pub name: String,
+    /// Parameter names (e.g. ["account", "required", "available"])
+    pub param_names: Vec<String>,
+    /// Parameter types as SolType (e.g. [Address, Uint(256), Uint(256)])
+    pub param_types: Vec<SolType>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SolInterface {
     pub functions: Vec<SolFunction>,
+    pub errors: Vec<SolErrorDecl>,
 }
 
 pub fn parse_solidity_interface(source: &str) -> Result<SolInterface, String> {
     let mut interface_name = String::new();
     let mut functions = Vec::new();
+    let mut errors = Vec::new();
 
     for line in source.lines() {
         let line = line.trim();
@@ -31,13 +47,139 @@ pub fn parse_solidity_interface(source: &str) -> Result<SolInterface, String> {
         {
             functions.push(func);
         }
+
+        if line.starts_with("error ")
+            && let Some(err) = parse_error_line(line)
+        {
+            errors.push(err);
+        }
     }
 
     if interface_name.is_empty() {
         return Err("No interface found in Solidity file".to_string());
     }
 
-    Ok(SolInterface { functions })
+    Ok(SolInterface { functions, errors })
+}
+
+/// Parse an `error` declaration line.
+///
+/// Accepts lines like:
+/// - `error InsufficientBalance(address account, uint256 required, uint256 available);`
+/// - `error Unauthorized();`
+fn parse_error_line(line: &str) -> Option<SolErrorDecl> {
+    let line = line.strip_prefix("error ")?.trim();
+
+    let paren_start = line.find('(')?;
+    let name = line[..paren_start].trim().to_string();
+    let paren_end = find_matching_paren(line, paren_start)?;
+    let params_str = &line[paren_start + 1..paren_end];
+
+    let mut param_names = Vec::new();
+    let mut param_types = Vec::new();
+
+    if !params_str.trim().is_empty() {
+        let params = split_top_level(params_str);
+        for param in &params {
+            let (ty_str, name_str) = parse_typed_param(param)?;
+            let sol_type = sol_type_from_str(&ty_str)?;
+            param_types.push(sol_type);
+            param_names.push(name_str);
+        }
+    }
+
+    Some(SolErrorDecl {
+        name,
+        param_names,
+        param_types,
+    })
+}
+
+/// Parse a typed parameter like "uint256 amount" or "address account"
+/// into (type_string, name_string). Unnamed params like "uint256" return
+/// an empty name.
+fn parse_typed_param(param: &str) -> Option<(String, String)> {
+    let param = param.trim();
+    if param.is_empty() {
+        return None;
+    }
+    // If there's no whitespace, it's a type-only param (no name)
+    match param.rfind(|c: char| c.is_whitespace()) {
+        Some(last_space) => {
+            let ty = param[..last_space].trim().to_string();
+            let name = param[last_space..].trim().to_string();
+            if ty.is_empty() {
+                return None;
+            }
+            Some((ty, name))
+        }
+        None => Some((param.to_string(), String::new())),
+    }
+}
+
+/// Convert a Solidity type string to SolType.
+/// Handles primitives, arrays (`uint256[]`), fixed arrays (`uint256[3]`),
+/// and tuples (`(address,uint256)`).
+fn sol_type_from_str(ty: &str) -> Option<SolType> {
+    let ty = ty.trim();
+
+    // Tuple: (type1,type2,...)
+    if ty.starts_with('(') {
+        let close = find_matching_paren(ty, 0)?;
+        let inner = &ty[1..close];
+        let elem_types = split_top_level(inner)
+            .into_iter()
+            .map(|t| sol_type_from_str(&t))
+            .collect::<Option<Vec<_>>>()?;
+
+        // Check for array suffix after the tuple: (type1,type2)[] or (type1,type2)[3]
+        let suffix = &ty[close + 1..];
+        return wrap_with_array_suffix(SolType::Tuple(elem_types), suffix);
+    }
+
+    // Array suffix: base_type[] or base_type[N]
+    if let Some(bracket_pos) = ty.rfind('[') {
+        let base = &ty[..bracket_pos];
+        let suffix = &ty[bracket_pos..];
+        let inner = sol_type_from_str(base)?;
+        return wrap_with_array_suffix(inner, suffix);
+    }
+
+    match ty {
+        "address" => Some(SolType::Address),
+        "bool" => Some(SolType::Bool),
+        "string" => Some(SolType::String),
+        "bytes" => Some(SolType::DynBytes),
+        t if t.starts_with("uint") => {
+            let bits: usize = t[4..].parse().unwrap_or(256);
+            Some(SolType::Uint(bits))
+        }
+        t if t.starts_with("int") => {
+            let bits: usize = t[3..].parse().unwrap_or(256);
+            Some(SolType::Int(bits))
+        }
+        t if t.starts_with("bytes") => {
+            let size: usize = t[5..].parse().ok()?;
+            Some(SolType::Bytes(size))
+        }
+        _ => None,
+    }
+}
+
+/// Wrap a SolType with array suffix: `[]` → Array, `[N]` → FixedArray, empty → identity.
+fn wrap_with_array_suffix(inner: SolType, suffix: &str) -> Option<SolType> {
+    let suffix = suffix.trim();
+    if suffix.is_empty() {
+        return Some(inner);
+    }
+    if suffix == "[]" {
+        return Some(SolType::Array(Box::new(inner)));
+    }
+    if suffix.starts_with('[') && suffix.ends_with(']') {
+        let size: usize = suffix[1..suffix.len() - 1].parse().ok()?;
+        return Some(SolType::FixedArray(Box::new(inner), size));
+    }
+    None
 }
 
 fn parse_function_line(line: &str) -> Option<SolFunction> {
@@ -210,6 +352,124 @@ mod tests {
         assert_eq!(to_snake_case("totalSupply"), "total_supply");
         assert_eq!(to_snake_case("balanceOf"), "balance_of");
         assert_eq!(to_snake_case("transfer"), "transfer");
+    }
+
+    #[test]
+    fn test_parse_error_with_params() {
+        let source = r#"
+            interface MyToken {
+                function transfer(address to, uint256 amount) external;
+                error InsufficientBalance(address account, uint256 required, uint256 available);
+                error Unauthorized();
+            }
+        "#;
+
+        let iface = parse_solidity_interface(source).unwrap();
+        assert_eq!(iface.errors.len(), 2);
+
+        let err = &iface.errors[0];
+        assert_eq!(err.name, "InsufficientBalance");
+        assert_eq!(err.param_names, vec!["account", "required", "available"]);
+        assert_eq!(err.param_types.len(), 3);
+        assert!(matches!(err.param_types[0], SolType::Address));
+        assert!(matches!(err.param_types[1], SolType::Uint(256)));
+        assert!(matches!(err.param_types[2], SolType::Uint(256)));
+
+        let err = &iface.errors[1];
+        assert_eq!(err.name, "Unauthorized");
+        assert!(err.param_names.is_empty());
+        assert!(err.param_types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_line_directly() {
+        let err = parse_error_line("error Overflow(uint64 value, uint64 max);").unwrap();
+        assert_eq!(err.name, "Overflow");
+        assert_eq!(err.param_names, vec!["value", "max"]);
+        assert!(matches!(err.param_types[0], SolType::Uint(64)));
+        assert!(matches!(err.param_types[1], SolType::Uint(64)));
+    }
+
+    #[test]
+    fn test_parse_error_no_params() {
+        let err = parse_error_line("error Unauthorized();").unwrap();
+        assert_eq!(err.name, "Unauthorized");
+        assert!(err.param_names.is_empty());
+        assert!(err.param_types.is_empty());
+    }
+
+    #[test]
+    fn test_sol_type_from_str() {
+        // Primitives
+        assert!(matches!(sol_type_from_str("address"), Some(SolType::Address)));
+        assert!(matches!(sol_type_from_str("bool"), Some(SolType::Bool)));
+        assert!(matches!(sol_type_from_str("uint256"), Some(SolType::Uint(256))));
+        assert!(matches!(sol_type_from_str("uint64"), Some(SolType::Uint(64))));
+        assert!(matches!(sol_type_from_str("int128"), Some(SolType::Int(128))));
+        assert!(matches!(sol_type_from_str("bytes32"), Some(SolType::Bytes(32))));
+        assert!(matches!(sol_type_from_str("string"), Some(SolType::String)));
+        assert!(matches!(sol_type_from_str("bytes"), Some(SolType::DynBytes)));
+
+        // Dynamic arrays
+        let ty = sol_type_from_str("uint256[]").unwrap();
+        assert!(matches!(ty, SolType::Array(inner) if matches!(*inner, SolType::Uint(256))));
+
+        // Fixed arrays
+        let ty = sol_type_from_str("address[3]").unwrap();
+        assert!(matches!(ty, SolType::FixedArray(inner, 3) if matches!(*inner, SolType::Address)));
+
+        // Tuples
+        let ty = sol_type_from_str("(address,uint256)").unwrap();
+        if let SolType::Tuple(types) = ty {
+            assert_eq!(types.len(), 2);
+            assert!(matches!(types[0], SolType::Address));
+            assert!(matches!(types[1], SolType::Uint(256)));
+        } else {
+            panic!("Expected Tuple");
+        }
+
+        // Tuple array
+        let ty = sol_type_from_str("(address,uint256)[]").unwrap();
+        assert!(matches!(ty, SolType::Array(inner) if matches!(*inner, SolType::Tuple(_))));
+
+        // Nested tuple
+        let ty = sol_type_from_str("((uint64,uint64),uint256)").unwrap();
+        if let SolType::Tuple(types) = ty {
+            assert_eq!(types.len(), 2);
+            assert!(matches!(&types[0], SolType::Tuple(inner) if inner.len() == 2));
+        } else {
+            panic!("Expected nested Tuple");
+        }
+    }
+
+    #[test]
+    fn test_parse_error_with_tuple_param() {
+        let err =
+            parse_error_line("error BadSwap((address,uint256) order, uint256 minOutput);").unwrap();
+        assert_eq!(err.name, "BadSwap");
+        assert_eq!(err.param_names, vec!["order", "minOutput"]);
+        assert_eq!(err.param_types.len(), 2);
+        assert!(matches!(&err.param_types[0], SolType::Tuple(t) if t.len() == 2));
+        assert!(matches!(err.param_types[1], SolType::Uint(256)));
+    }
+
+    #[test]
+    fn test_parse_error_with_array_param() {
+        let err = parse_error_line("error BadBatch(uint256[] ids);").unwrap();
+        assert_eq!(err.name, "BadBatch");
+        assert!(matches!(&err.param_types[0], SolType::Array(inner) if matches!(**inner, SolType::Uint(256))));
+    }
+
+    #[test]
+    fn test_parse_error_unnamed_params() {
+        let err = parse_error_line("error E(uint256, address);").unwrap();
+        assert_eq!(err.name, "E");
+        assert_eq!(err.param_types.len(), 2);
+        assert!(matches!(err.param_types[0], SolType::Uint(256)));
+        assert!(matches!(err.param_types[1], SolType::Address));
+        // Names should be empty for unnamed params
+        assert_eq!(err.param_names[0], "");
+        assert_eq!(err.param_names[1], "");
     }
 
     #[test]
