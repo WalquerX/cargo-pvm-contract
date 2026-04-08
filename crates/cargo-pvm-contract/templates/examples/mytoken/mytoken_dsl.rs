@@ -28,8 +28,20 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 use pvm_contract_builder_dsl::pallet_revive_uapi::HostFnImpl as api;
 
-#[derive(Debug, pvm_contract_macros::SolError)]
 pub struct InsufficientBalance;
+
+impl pvm_contract_types::SolError for InsufficientBalance {
+    const SELECTOR: [u8; 4] = pvm_contract_types::const_selector("InsufficientBalance()");
+    const SIGNATURE: &'static str = "InsufficientBalance()";
+
+    fn encode_params(&self, _buf: &mut [u8]) -> usize {
+        0
+    }
+
+    fn encoded_size(&self) -> usize {
+        4
+    }
+}
 
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
