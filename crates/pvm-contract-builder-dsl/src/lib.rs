@@ -19,6 +19,7 @@ pub type Selector = [u8; 4];
 ///
 /// This is a convenience for DSL handlers. The `#[contract]` macro path
 /// handles error encoding automatically in the dispatch layer.
+#[allow(unreachable_code)]
 pub fn revert_with<H: pallet_revive_uapi::HostFn, E: pvm_contract_types::SolRevert>(e: &E) -> ! {
     let mut buf = [0u8; 256];
     let len = e.revert_data(&mut buf);

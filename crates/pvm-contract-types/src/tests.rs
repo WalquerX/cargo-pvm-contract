@@ -1310,10 +1310,7 @@ fn encode_decode_bytes32_max() {
 fn revert_string_selector_is_correct() {
     // keccak256("Error(string)")[0:4] = 0x08c379a0
     assert_eq!(RevertString::SELECTOR, [0x08, 0xc3, 0x79, 0xa0]);
-    assert_eq!(
-        RevertString::SELECTOR,
-        const_selector("Error(string)")
-    );
+    assert_eq!(RevertString::SELECTOR, const_selector("Error(string)"));
 }
 
 #[test]
@@ -1381,10 +1378,7 @@ fn revert_string_encoded_size_matches_encode_params() {
 fn panic_selector_is_correct() {
     // keccak256("Panic(uint256)")[0:4] = 0x4e487b71
     assert_eq!(Panic::SELECTOR, [0x4e, 0x48, 0x7b, 0x71]);
-    assert_eq!(
-        Panic::SELECTOR,
-        const_selector("Panic(uint256)")
-    );
+    assert_eq!(Panic::SELECTOR, const_selector("Panic(uint256)"));
 }
 
 #[test]
@@ -1445,16 +1439,24 @@ fn sol_revert_enum_dispatches_correctly() {
     impl SolError for ErrA {
         const SELECTOR: [u8; 4] = [0xAA, 0, 0, 0];
         const SIGNATURE: &'static str = "ErrA()";
-        fn encode_params(&self, _buf: &mut [u8]) -> usize { 0 }
-        fn encoded_size(&self) -> usize { 4 }
+        fn encode_params(&self, _buf: &mut [u8]) -> usize {
+            0
+        }
+        fn encoded_size(&self) -> usize {
+            4
+        }
     }
 
     struct ErrB;
     impl SolError for ErrB {
         const SELECTOR: [u8; 4] = [0xBB, 0, 0, 0];
         const SIGNATURE: &'static str = "ErrB()";
-        fn encode_params(&self, _buf: &mut [u8]) -> usize { 0 }
-        fn encoded_size(&self) -> usize { 4 }
+        fn encode_params(&self, _buf: &mut [u8]) -> usize {
+            0
+        }
+        fn encoded_size(&self) -> usize {
+            4
+        }
     }
 
     sol_revert_enum! {
@@ -1497,8 +1499,12 @@ fn sol_revert_enum_question_mark_propagation() {
     impl SolError for CustomErr {
         const SELECTOR: [u8; 4] = [0xCC, 0, 0, 0];
         const SIGNATURE: &'static str = "CustomErr()";
-        fn encode_params(&self, _buf: &mut [u8]) -> usize { 0 }
-        fn encoded_size(&self) -> usize { 4 }
+        fn encode_params(&self, _buf: &mut [u8]) -> usize {
+            0
+        }
+        fn encoded_size(&self) -> usize {
+            4
+        }
     }
 
     sol_revert_enum! {

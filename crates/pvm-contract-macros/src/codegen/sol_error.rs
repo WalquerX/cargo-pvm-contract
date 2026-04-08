@@ -167,10 +167,7 @@ mod tests {
 
     #[test]
     fn build_selector_for_known_types_is_literal() {
-        let fields = vec![(
-            Some(syn::parse_str("x").unwrap()),
-            SolType::Uint(64),
-        )];
+        let fields = vec![(Some(syn::parse_str("x").unwrap()), SolType::Uint(64))];
         let sel = build_selector_expr("Foo", &fields);
         let sel_str = sel.to_string();
         assert!(
@@ -219,8 +216,7 @@ mod tests {
 
     #[test]
     fn accepts_dynamic_fields() {
-        let input: DeriveInput =
-            syn::parse_str("struct DynError { msg: String }").unwrap();
+        let input: DeriveInput = syn::parse_str("struct DynError { msg: String }").unwrap();
         let result = expand_sol_error(input);
         assert!(result.is_ok(), "Dynamic fields should be accepted now");
     }

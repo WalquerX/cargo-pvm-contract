@@ -605,7 +605,9 @@ pub(crate) fn generate_dynamic_encode_body(
     }
 }
 
-pub(crate) fn extract_field_info(fields: &Fields) -> syn::Result<Vec<(Option<syn::Ident>, SolType)>> {
+pub(crate) fn extract_field_info(
+    fields: &Fields,
+) -> syn::Result<Vec<(Option<syn::Ident>, SolType)>> {
     let mut result = Vec::new();
 
     match fields {

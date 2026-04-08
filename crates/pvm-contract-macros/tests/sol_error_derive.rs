@@ -12,7 +12,8 @@ struct InsufficientBalance {
 #[test]
 fn selector_matches_keccak() {
     // keccak256("InsufficientBalance(address,uint256,uint256)")[0:4]
-    let expected = pvm_contract_types::const_selector("InsufficientBalance(address,uint256,uint256)");
+    let expected =
+        pvm_contract_types::const_selector("InsufficientBalance(address,uint256,uint256)");
     assert_eq!(InsufficientBalance::SELECTOR, expected);
 }
 
@@ -123,10 +124,7 @@ struct PointError {
 #[test]
 fn nested_custom_type_signature() {
     // Point encodes as (uint64,uint64)
-    assert_eq!(
-        PointError::SIGNATURE,
-        "PointError((uint64,uint64),uint256)"
-    );
+    assert_eq!(PointError::SIGNATURE, "PointError((uint64,uint64),uint256)");
 }
 
 #[test]

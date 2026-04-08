@@ -368,27 +368,36 @@ mod tests {
 
         let abi = AbiJson(vec![
             AbiItem::Constructor {
-                inputs: vec![
-                    AbiParam { name: "supply".to_string(), param_type: "uint256".to_string() },
-                ],
+                inputs: vec![AbiParam {
+                    name: "supply".to_string(),
+                    param_type: "uint256".to_string(),
+                }],
                 state_mutability: Some("nonpayable".to_string()),
             },
             AbiItem::Function {
                 name: "transfer".to_string(),
                 inputs: vec![
-                    AbiParam { name: "to".to_string(), param_type: "address".to_string() },
-                    AbiParam { name: "amount".to_string(), param_type: "uint256".to_string() },
+                    AbiParam {
+                        name: "to".to_string(),
+                        param_type: "address".to_string(),
+                    },
+                    AbiParam {
+                        name: "amount".to_string(),
+                        param_type: "uint256".to_string(),
+                    },
                 ],
-                outputs: vec![
-                    AbiParam { name: "".to_string(), param_type: "bool".to_string() },
-                ],
+                outputs: vec![AbiParam {
+                    name: "".to_string(),
+                    param_type: "bool".to_string(),
+                }],
                 state_mutability: Some("nonpayable".to_string()),
             },
             AbiItem::Error {
                 name: "InsufficientBalance".to_string(),
-                inputs: vec![
-                    AbiParam { name: "account".to_string(), param_type: "address".to_string() },
-                ],
+                inputs: vec![AbiParam {
+                    name: "account".to_string(),
+                    param_type: "address".to_string(),
+                }],
             },
             AbiItem::Error {
                 name: "Unauthorized".to_string(),
@@ -428,10 +437,9 @@ mod tests {
         assert_eq!(inputs[1].param_type, "uint256");
 
         // Error with tuple param
-        let item = parse_sol_error_line(
-            "error BadSwap((address,uint256) order, uint256 received);",
-        )
-        .unwrap();
+        let item =
+            parse_sol_error_line("error BadSwap((address,uint256) order, uint256 received);")
+                .unwrap();
         let AbiItem::Error { inputs, .. } = &item else {
             panic!("Expected Error")
         };
@@ -465,10 +473,7 @@ mod tests {
         assert_eq!(inputs[1].param_type, "string");
         assert_eq!(inputs[1].name, "name");
 
-        let item = parse_sol_error_line(
-            "error BadData(bytes calldata data);",
-        )
-        .unwrap();
+        let item = parse_sol_error_line("error BadData(bytes calldata data);").unwrap();
         let AbiItem::Error { inputs, .. } = &item else {
             panic!("Expected Error")
         };

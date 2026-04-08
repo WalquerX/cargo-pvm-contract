@@ -401,14 +401,32 @@ mod tests {
     #[test]
     fn test_sol_type_from_str() {
         // Primitives
-        assert!(matches!(sol_type_from_str("address"), Some(SolType::Address)));
+        assert!(matches!(
+            sol_type_from_str("address"),
+            Some(SolType::Address)
+        ));
         assert!(matches!(sol_type_from_str("bool"), Some(SolType::Bool)));
-        assert!(matches!(sol_type_from_str("uint256"), Some(SolType::Uint(256))));
-        assert!(matches!(sol_type_from_str("uint64"), Some(SolType::Uint(64))));
-        assert!(matches!(sol_type_from_str("int128"), Some(SolType::Int(128))));
-        assert!(matches!(sol_type_from_str("bytes32"), Some(SolType::Bytes(32))));
+        assert!(matches!(
+            sol_type_from_str("uint256"),
+            Some(SolType::Uint(256))
+        ));
+        assert!(matches!(
+            sol_type_from_str("uint64"),
+            Some(SolType::Uint(64))
+        ));
+        assert!(matches!(
+            sol_type_from_str("int128"),
+            Some(SolType::Int(128))
+        ));
+        assert!(matches!(
+            sol_type_from_str("bytes32"),
+            Some(SolType::Bytes(32))
+        ));
         assert!(matches!(sol_type_from_str("string"), Some(SolType::String)));
-        assert!(matches!(sol_type_from_str("bytes"), Some(SolType::DynBytes)));
+        assert!(matches!(
+            sol_type_from_str("bytes"),
+            Some(SolType::DynBytes)
+        ));
 
         // Dynamic arrays
         let ty = sol_type_from_str("uint256[]").unwrap();
@@ -457,7 +475,9 @@ mod tests {
     fn test_parse_error_with_array_param() {
         let err = parse_error_line("error BadBatch(uint256[] ids);").unwrap();
         assert_eq!(err.name, "BadBatch");
-        assert!(matches!(&err.param_types[0], SolType::Array(inner) if matches!(**inner, SolType::Uint(256))));
+        assert!(
+            matches!(&err.param_types[0], SolType::Array(inner) if matches!(**inner, SolType::Uint(256)))
+        );
     }
 
     #[test]
