@@ -11,6 +11,7 @@ pub struct SolFunction {
 ///
 /// Example: `error InsufficientBalance(address account, uint256 required, uint256 available);`
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields used by builder crate's ABI generation; will be consumed here when .sol error codegen lands
 pub struct SolErrorDecl {
     /// Error name (e.g. "InsufficientBalance")
     pub name: String,
@@ -23,6 +24,7 @@ pub struct SolErrorDecl {
 #[derive(Debug, Clone)]
 pub struct SolInterface {
     pub functions: Vec<SolFunction>,
+    #[allow(dead_code)]
     pub errors: Vec<SolErrorDecl>,
 }
 
