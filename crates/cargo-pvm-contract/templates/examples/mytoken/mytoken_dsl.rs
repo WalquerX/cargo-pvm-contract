@@ -28,18 +28,8 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 use pvm_contract_builder_dsl::pallet_revive_uapi::HostFnImpl as api;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    InsufficientBalance,
-}
-
-impl AsRef<[u8]> for Error {
-    fn as_ref(&self) -> &[u8] {
-        match *self {
-            Error::InsufficientBalance => b"InsufficientBalance",
-        }
-    }
-}
+#[derive(Debug, pvm_contract_macros::SolError)]
+pub struct InsufficientBalance;
 
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
@@ -103,7 +93,7 @@ fn transfer_handler(input: &[u8]) {
     };
 
     if sender_balance < amount {
-        HostFnImpl::return_value(ReturnFlags::REVERT, Error::InsufficientBalance.as_ref());
+        pvm_contract_builder_dsl::revert_with::<HostFnImpl, _>(&InsufficientBalance);
     }
 
     let new_sender_balance = sender_balance - amount;
