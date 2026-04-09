@@ -12,14 +12,8 @@ mod my_token {
     #[derive(Debug, pvm_contract_macros::SolError)]
     pub struct InsufficientBalance;
 
-    pvm_contract_types::sol_revert_enum! {
-        pub enum TokenError {
-            InsufficientBalance(InsufficientBalance),
-        }
-    }
-
     #[pvm_contract_macros::constructor]
-    pub fn new() -> Result<(), TokenError> {
+    pub fn new() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
@@ -49,12 +43,12 @@ mod my_token {
     }
 
     #[pvm_contract_macros::method]
-    pub fn transfer(to: Address, amount: U256) -> Result<(), TokenError> {
+    pub fn transfer(to: Address, amount: U256) -> Result<(), InsufficientBalance> {
         let caller = get_caller();
         let sender_balance = balance_of(caller.into());
 
         if sender_balance < amount {
-            return Err(InsufficientBalance.into());
+            return Err(InsufficientBalance);
         }
 
         let new_sender_balance = sender_balance - amount;
@@ -70,7 +64,7 @@ mod my_token {
     }
 
     #[pvm_contract_macros::method]
-    pub fn mint(to: Address, amount: U256) -> Result<(), TokenError> {
+    pub fn mint(to: Address, amount: U256) -> Result<(), InsufficientBalance> {
         let new_recipient_balance = balance_of(to).saturating_add(amount);
 
         let to: [u8; 20] = to.into();
@@ -85,7 +79,7 @@ mod my_token {
     }
 
     #[pvm_contract_macros::fallback]
-    pub fn fallback() -> Result<(), TokenError> {
+    pub fn fallback() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
