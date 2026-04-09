@@ -18,7 +18,7 @@ mod constructor_args {
     }
 
     #[pvm_contract_macros::constructor]
-    pub fn new(owner: Address, initial_supply: U256) -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn new(owner: Address, initial_supply: U256) -> Result<(), pvm_contract_types::EmptyError> {
         let addr: [u8; 20] = owner.into();
         let mut buf = [0u8; 32];
         buf[12..32].copy_from_slice(&addr);
@@ -45,7 +45,7 @@ mod constructor_args {
     }
 
     #[pvm_contract_macros::fallback]
-    pub fn fallback() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn fallback() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 

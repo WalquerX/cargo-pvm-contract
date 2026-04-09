@@ -9,7 +9,7 @@ mod flipper {
     const STORAGE_KEY: [u8; 32] = [0u8; 32];
 
     #[pvm_contract_macros::constructor]
-    pub fn new() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn new() -> Result<(), pvm_contract_types::EmptyError> {
         // Initialize to false (0)
         api::set_storage(StorageFlags::empty(), &STORAGE_KEY, &[0u8; 32]);
         Ok(())
@@ -30,7 +30,7 @@ mod flipper {
     }
 
     #[pvm_contract_macros::fallback]
-    pub fn fallback() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn fallback() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 

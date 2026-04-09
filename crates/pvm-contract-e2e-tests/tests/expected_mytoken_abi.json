@@ -1,5 +1,10 @@
 [
   {
+    "type": "error",
+    "name": "InsufficientBalance",
+    "inputs": []
+  },
+  {
     "type": "function",
     "name": "totalSupply",
     "inputs": [],

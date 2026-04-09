@@ -393,6 +393,32 @@ impl From<RevertString<'static>> for SolDefaultError {
     }
 }
 
+/// Zero-cost error type for contracts that never produce errors.
+///
+/// This is an uninhabited enum since `match *self {}` compiles to zero code.
+/// Use this when constructor/fallback return `Result` but never actually
+/// fail. Unlike [`SolDefaultError`], this adds zero bytes to the contract
+/// binary since no error encoding code is generated.
+///
+/// **When to use which:**
+/// - No error paths → `EmptyError`
+/// - Custom errors → [`sol_revert_enum!`] (auto-injects `Panic` + `RevertString`)
+/// - Standard errors only → [`SolDefaultError`]
+///
+/// ```ignore
+/// type Error = pvm_contract_types::EmptyError;
+///
+/// pub fn new() -> Result<(), Error> { Ok(()) }
+/// pub fn fallback() -> Result<(), Error> { Ok(()) }
+/// ```
+pub enum EmptyError {}
+
+impl SolRevert for EmptyError {
+    fn revert_data(&self, _buf: &mut [u8]) -> usize {
+        match *self {}
+    }
+}
+
 /// Generate an error enum with [`SolRevert`] impl and [`From`] conversions
 /// for `?` propagation.
 ///

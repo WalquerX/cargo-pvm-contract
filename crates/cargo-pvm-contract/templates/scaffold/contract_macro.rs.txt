@@ -20,12 +20,12 @@ mod contract {
     use super::*;
 
     #[pvm_contract_macros::constructor]
-    pub fn new() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn new() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
     #[pvm_contract_macros::fallback]
-    pub fn fallback() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn fallback() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
@@ -41,7 +41,7 @@ mod contract {
     // Add your contract methods here
     // Example:
     // #[pvm_contract_macros::method]
-    // pub fn my_method(param: U256) -> Result<U256, pvm_contract_types::SolDefaultError> {
+    // pub fn my_method(param: U256) -> Result<U256, pvm_contract_types::EmptyError> {
     //     Ok(param)
     // }
 {% endif %}

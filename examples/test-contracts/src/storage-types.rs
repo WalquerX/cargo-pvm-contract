@@ -25,7 +25,7 @@ mod storage_types {
     }
 
     #[pvm_contract_macros::constructor]
-    pub fn new() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn new() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
@@ -151,7 +151,7 @@ mod storage_types {
     }
 
     #[pvm_contract_macros::fallback]
-    pub fn fallback() -> Result<(), pvm_contract_types::SolDefaultError> {
+    pub fn fallback() -> Result<(), pvm_contract_types::EmptyError> {
         Ok(())
     }
 
