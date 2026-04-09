@@ -552,13 +552,8 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
-                    {
-                        let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
-                        let mut __buf = [0u8; 256];
-                        let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
-                    }
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
                 let input = &call_data[..call_data_len];
@@ -662,13 +657,8 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let call_data_len = pallet_revive_uapi::HostFnImpl::call_data_size() as usize;
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
-                    {
-                        let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
-                        let mut __buf = [0u8; 256];
-                        let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
-                    }
+                    pallet_revive_uapi::HostFnImpl::return_value(
+                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 

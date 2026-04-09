@@ -30,13 +30,8 @@ pub(super) fn generate_param_decoding(
     let size_check = if !sol_types.is_empty() {
         quote! {
             if input.len() < (#min_size_expr) {
-                {
-                    let __err = ::pvm_contract_types::RevertString("InvalidCalldata");
-                    let mut __buf = [0u8; 256];
-                    let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
-                    pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
-                }
+                pallet_revive_uapi::HostFnImpl::return_value(
+                    pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
             }
         }
     } else {

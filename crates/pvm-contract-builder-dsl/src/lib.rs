@@ -113,12 +113,12 @@ impl ContractBuilder {
 
         let mut buf = [0u8; BUF_SIZE];
         if call_data_len > BUF_SIZE {
-            revert_with::<H, _>(&pvm_contract_types::RevertString("CalldataTooLarge"));
+            H::return_value(ReturnFlags::REVERT, b"CalldataTooLarge");
         }
         H::call_data_copy(&mut buf[..call_data_len], 0);
 
         if call_data_len < 4 {
-            revert_with::<H, _>(&pvm_contract_types::RevertString("NoSelector"));
+            H::return_value(ReturnFlags::REVERT, b"NoSelector");
         }
 
         let selector: [u8; 4] = [buf[0], buf[1], buf[2], buf[3]];
@@ -134,6 +134,6 @@ impl ContractBuilder {
             i += 1;
         }
 
-        revert_with::<H, _>(&pvm_contract_types::RevertString("UnknownSelector"))
+        H::return_value(ReturnFlags::REVERT, b"UnknownSelector")
     }
 }
