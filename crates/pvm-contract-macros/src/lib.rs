@@ -117,22 +117,26 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 /// pub extern "C" fn call() { /* dispatch logic */ }
 /// ```
 ///
-/// ## Error Type
+/// ## Error Handling
 ///
-/// The scaffold generates an empty `Error` enum inside the contract module.
-/// You are expected to add your own error variants as needed:
+/// The scaffold uses `EmptyError` for methods that don't produce errors.
+/// To add custom errors, define `SolError` structs and use them directly:
 ///
 /// ```ignore
 /// mod my_token {
 ///     #[derive(Debug, pvm_contract_macros::SolError)]
 ///     pub struct InsufficientBalance;
 ///
-///     pvm_contract_types::sol_revert_enum! {
-///         pub enum TokenError {
-///             InsufficientBalance(InsufficientBalance),
-///         }
-///     }
-///     // ... methods returning Result<T, TokenError>
+///     // Single error: use the struct directly
+///     pub fn transfer(to: Address, amount: U256) -> Result<(), InsufficientBalance> { ... }
+///
+///     // Multiple errors: wrap with sol_revert_enum!
+///     // pvm_contract_types::sol_revert_enum! {
+///     //     pub enum TokenError {
+///     //         InsufficientBalance(InsufficientBalance),
+///     //         Unauthorized(Unauthorized),
+///     //     }
+///     // }
 /// }
 /// ```
 ///
@@ -165,12 +169,8 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///     let mut call_data = [0u8; 512];
 ///
 ///     if call_data_len > 512 {
-///         // ABI-encoded Error(string) revert
-///         let __err = ::pvm_contract_types::RevertString("CalldataTooLarge");
-///         let mut __buf = [0u8; 256];
-///         let __len = ::pvm_contract_types::SolRevert::revert_data(&__err, &mut __buf);
 ///         pallet_revive_uapi::HostFnImpl::return_value(
-///             pallet_revive_uapi::ReturnFlags::REVERT, &__buf[..__len]);
+///             pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
 ///     }
 ///     pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 ///
