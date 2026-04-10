@@ -3,6 +3,7 @@ use quote::quote;
 use syn::{Attribute, Ident, ItemMod, LitInt, LitStr, Token, parse::Parse, parse::ParseStream};
 
 use super::abi_gen::generate_abi_gen_main;
+use super::dispatch::generate_revert_encoding;
 use super::dispatch::{MethodInfo, generate_dispatch_arm, generate_param_decoding};
 use crate::signature::{FunctionSignature, SolType};
 use crate::solidity::{SolInterface, parse_solidity_interface, to_snake_case};
@@ -562,16 +563,14 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
         };
 
         let call_expr = quote! { #mod_name::#constructor_name(#(#call_args),*) };
+        let revert_err = generate_revert_encoding(use_alloc);
         let decode_and_call = if parsed.constructor_returns_result {
             quote! {
                 #(#decode_statements)*
                 match #call_expr {
                     Ok(()) => {}
                     Err(e) => {
-                        let mut __revert_buf = [0u8; 256];
-                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
+                        #revert_err
                     }
                 }
             }
@@ -604,14 +603,12 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
 
     let fallback_handler = if parsed.has_fallback {
         let fallback_name = parsed.fallback_name.as_ref().unwrap();
+        let revert_err = generate_revert_encoding(use_alloc);
         quote! {
             match #mod_name::#fallback_name() {
                 Ok(()) => return,
                 Err(e) => {
-                    let mut __revert_buf = [0u8; 256];
-                    let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
-                    pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
+                    #revert_err
                 }
             }
         }

@@ -326,9 +326,18 @@ mod tests {
             AbiItem::Error {
                 name: "InsufficientBalance".to_string(),
                 inputs: vec![
-                    AbiParam { name: "account".to_string(), param_type: "address".to_string() },
-                    AbiParam { name: "required".to_string(), param_type: "uint256".to_string() },
-                    AbiParam { name: "available".to_string(), param_type: "uint256".to_string() },
+                    AbiParam {
+                        name: "account".to_string(),
+                        param_type: "address".to_string()
+                    },
+                    AbiParam {
+                        name: "required".to_string(),
+                        param_type: "uint256".to_string()
+                    },
+                    AbiParam {
+                        name: "available".to_string(),
+                        param_type: "uint256".to_string()
+                    },
                 ],
             }
         );

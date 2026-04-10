@@ -335,7 +335,6 @@ mod tests {
         assert!(err.param_types.is_empty());
     }
 
-
     #[test]
     fn test_parse_error_with_tuple_param() {
         let err =

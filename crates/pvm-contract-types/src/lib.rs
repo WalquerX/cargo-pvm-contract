@@ -199,18 +199,16 @@ pub trait SolDecode: SolEncode + Sized {
 /// The wire format is: selector (4 bytes) + ABI-encoded parameters.
 /// This matches what the Solidity compiler produces for custom errors.
 ///
-/// # Buffer constraint
+/// # Buffer allocation
 ///
-/// Unlike EVM Solidity (which dynamically sizes revert data), PVM contracts
-/// encode errors into a fixed 256-byte stack buffer to support no-alloc
-/// environments. Static error fields (address, uint256, bool, custom structs)
-/// are always safe — their total size is known at compile time and is
-/// well within the limit. Errors with dynamic fields (String, Vec) must
-/// keep the total encoded payload under 252 bytes (256 minus the 4-byte
-/// selector), or the encoding may panic at runtime. [`RevertString`]
-/// handles this by truncating long messages automatically. For contracts
-/// using an allocator, a future improvement could use a dynamically-sized
-/// buffer to remove this constraint.
+/// In **no-alloc mode** (default stack), errors are encoded into a fixed
+/// 256-byte stack buffer. Static error fields are always safe. Errors with
+/// dynamic fields (String, Vec) must keep the total payload under 252 bytes
+/// or the encoding may panic. [`RevertString`] handles this with truncation.
+///
+/// In **alloc mode** (`allocator = "pico"` / `"bump"`), the dispatch uses
+/// [`SolRevert::revert_data_len`] to allocate an exact-size `Vec<u8>`,
+/// so errors with dynamic fields work regardless of payload size.
 pub trait SolError {
     /// The 4-byte error selector: `keccak256(SIGNATURE)[0:4]`.
     /// Computed at compile time.
@@ -239,6 +237,13 @@ pub trait SolRevert {
     /// Returns the number of bytes written.
     fn revert_data(&self, buf: &mut [u8]) -> usize;
 
+    /// Total byte length of the revert data (selector + params).
+    /// Used by alloc-mode dispatch to allocate an exact-size buffer.
+    /// Defaults to 256 (the stack buffer size) if not overridden.
+    fn revert_data_len(&self) -> usize {
+        256
+    }
+
     /// Return the Solidity error signatures for all error types that
     /// this type can produce. Used by abi-gen to emit ABI JSON error entries.
     ///
@@ -260,6 +265,10 @@ impl<E: SolError> SolRevert for E {
         }
         buf[0..4].copy_from_slice(&E::SELECTOR);
         4 + self.encode_params(&mut buf[4..])
+    }
+
+    fn revert_data_len(&self) -> usize {
+        self.encoded_size()
     }
 
     fn error_signatures() -> &'static [&'static str] {
@@ -376,6 +385,13 @@ impl SolRevert for SolDefaultError {
         }
     }
 
+    fn revert_data_len(&self) -> usize {
+        match self {
+            Self::Panic(e) => e.revert_data_len(),
+            Self::Revert(e) => e.revert_data_len(),
+        }
+    }
+
     fn error_signatures() -> &'static [&'static str] {
         &[Panic::SIGNATURE, RevertString::SIGNATURE]
     }
@@ -415,6 +431,10 @@ pub enum EmptyError {}
 
 impl SolRevert for EmptyError {
     fn revert_data(&self, _buf: &mut [u8]) -> usize {
+        match *self {}
+    }
+
+    fn revert_data_len(&self) -> usize {
         match *self {}
     }
 }
@@ -459,6 +479,14 @@ macro_rules! sol_revert_enum {
                     $(Self::$variant(e) => <$inner as $crate::SolRevert>::revert_data(e, buf),)+
                     Self::Panic(e) => $crate::SolRevert::revert_data(e, buf),
                     Self::Revert(e) => $crate::SolRevert::revert_data(e, buf),
+                }
+            }
+
+            fn revert_data_len(&self) -> usize {
+                match self {
+                    $(Self::$variant(e) => <$inner as $crate::SolRevert>::revert_data_len(e),)+
+                    Self::Panic(e) => $crate::SolRevert::revert_data_len(e),
+                    Self::Revert(e) => $crate::SolRevert::revert_data_len(e),
                 }
             }
 

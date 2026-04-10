@@ -6,6 +6,29 @@ use super::encode::{generate_dynamic_value_encode, generate_encode};
 use super::sol_type::{sol_type_head_size_expr, sol_type_is_dynamic_expr, sol_type_name_parts};
 use crate::signature::{FunctionSignature, SolType, compute_selector};
 
+/// Generate the error revert encoding for an `Err(e)` arm.
+/// In alloc mode, uses a dynamically-sized `Vec<u8>` so dynamic error fields
+/// are safe regardless of payload size.
+/// In stack mode, uses a fixed 256-byte buffer.
+pub(super) fn generate_revert_encoding(use_alloc: bool) -> TokenStream {
+    if use_alloc {
+        quote! {
+            let __revert_len = ::pvm_contract_types::SolRevert::revert_data_len(&e);
+            let mut __revert_buf = alloc::vec![0u8; __revert_len];
+            ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
+            pallet_revive_uapi::HostFnImpl::return_value(
+                pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf);
+        }
+    } else {
+        quote! {
+            let mut __revert_buf = [0u8; 256];
+            let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
+            pallet_revive_uapi::HostFnImpl::return_value(
+                pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
+        }
+    }
+}
+
 pub struct MethodInfo {
     pub fn_name: syn::Ident,
     pub signature: FunctionSignature,
@@ -136,16 +159,15 @@ pub fn generate_dispatch_arm(
     let has_return = !method.signature.outputs.is_empty();
     let encode_and_return = generate_encode_and_return(&method.signature.outputs, use_alloc);
 
+    let revert_err = generate_revert_encoding(use_alloc);
+
     let body = if method.returns_result {
         if has_return {
             quote! {
                 match #mod_name::#fn_name(#(#call_args),*) {
                     Ok(result) => { #encode_and_return }
                     Err(e) => {
-                        let mut __revert_buf = [0u8; 256];
-                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
+                        #revert_err
                     }
                 }
             }
@@ -154,10 +176,7 @@ pub fn generate_dispatch_arm(
                 match #mod_name::#fn_name(#(#call_args),*) {
                     Ok(()) => return,
                     Err(e) => {
-                        let mut __revert_buf = [0u8; 256];
-                        let __revert_len = ::pvm_contract_types::SolRevert::revert_data(&e, &mut __revert_buf);
-                        pallet_revive_uapi::HostFnImpl::return_value(
-                            pallet_revive_uapi::ReturnFlags::REVERT, &__revert_buf[..__revert_len]);
+                        #revert_err
                     }
                 }
             }
