@@ -32,6 +32,7 @@ pub fn parse_solidity_interface(source: &str) -> Result<SolInterface, String> {
     let mut interface_name = String::new();
     let mut functions = Vec::new();
     let mut errors = Vec::new();
+    let mut pending: Option<String> = None;
 
     for line in source.lines() {
         let line = line.trim();
@@ -44,10 +45,23 @@ pub fn parse_solidity_interface(source: &str) -> Result<SolInterface, String> {
             }
         }
 
-        if line.starts_with("function ")
-            && let Some(func) = parse_function_line(line)
-        {
-            functions.push(func);
+        if let Some(ref mut acc) = pending {
+            acc.push(' ');
+            acc.push_str(line);
+            if has_balanced_parens(acc) {
+                if let Some(func) = parse_function_line(acc) {
+                    functions.push(func);
+                }
+                pending = None;
+            }
+        } else if line.starts_with("function ") {
+            if has_balanced_parens(line) {
+                if let Some(func) = parse_function_line(line) {
+                    functions.push(func);
+                }
+            } else {
+                pending = Some(line.to_string());
+            }
         }
 
         if line.starts_with("error ")
@@ -117,6 +131,24 @@ fn parse_typed_param(param: &str) -> Option<(String, String)> {
         }
         None => Some((param.to_string(), String::new())),
     }
+}
+
+/// Check if all opening parens have matching closing parens.
+fn has_balanced_parens(s: &str) -> bool {
+    let mut depth = 0i32;
+    for ch in s.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 fn parse_function_line(line: &str) -> Option<SolFunction> {
@@ -376,5 +408,74 @@ mod tests {
             function.signature.canonical_signature(),
             "foo((address,uint256),uint256[3])"
         );
+    }
+
+    #[test]
+    fn test_no_interface_keyword_errors() {
+        let source = r#"
+            contract MyToken {
+                function totalSupply() external view returns (uint256);
+            }
+        "#;
+        let result = parse_solidity_interface(source);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "No interface found in Solidity file");
+    }
+
+    #[test]
+    fn test_empty_interface() {
+        let source = r#"
+            interface IEmpty {
+            }
+        "#;
+        let iface = parse_solidity_interface(source).unwrap();
+        assert!(iface.functions.is_empty());
+    }
+
+    #[test]
+    fn test_comment_lines_skipped() {
+        let source = r#"
+            // SPDX-License-Identifier: MIT
+            interface IToken {
+                // This is a comment
+                function totalSupply() external view returns (uint256);
+                /* block comment */
+                function transfer(address to, uint256 amount) external;
+            }
+        "#;
+        let iface = parse_solidity_interface(source).unwrap();
+        assert_eq!(iface.functions.len(), 2);
+        assert_eq!(iface.functions[0].name, "totalSupply");
+        assert_eq!(iface.functions[1].name, "transfer");
+    }
+
+    #[test]
+    fn test_multiline_function_declaration() {
+        let source = r#"
+            interface IToken {
+                function transfer(
+                    address to,
+                    uint256 amount
+                ) external returns (bool);
+                function totalSupply() external view returns (uint256);
+            }
+        "#;
+        let iface = parse_solidity_interface(source).unwrap();
+        assert_eq!(iface.functions.len(), 2);
+        assert_eq!(iface.functions[0].name, "transfer");
+        assert_eq!(iface.functions[1].name, "totalSupply");
+    }
+
+    #[test]
+    fn test_interface_brace_on_next_line() {
+        let source = r#"
+            interface IToken
+            {
+                function totalSupply() external view returns (uint256);
+            }
+        "#;
+        let iface = parse_solidity_interface(source).unwrap();
+        assert_eq!(iface.functions.len(), 1);
+        assert_eq!(iface.functions[0].name, "totalSupply");
     }
 }

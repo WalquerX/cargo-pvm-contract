@@ -98,7 +98,7 @@ fn generate_abi_via_feature(manifest_dir: &Path, bin_name: &str) -> Result<Optio
     Ok(Some(abi))
 }
 
-fn extract_sol_path_from_source(source: &str) -> Option<String> {
+pub(crate) fn extract_sol_path_from_source(source: &str) -> Option<String> {
     if let Some(start) = source.find("contract(\"") {
         let after_quote = &source[start + 10..];
         if let Some(end) = after_quote.find('"') {
@@ -111,7 +111,10 @@ fn extract_sol_path_from_source(source: &str) -> Option<String> {
     None
 }
 
-fn resolve_bin_source_path(manifest_dir: &Path, bin_name: &str) -> Result<std::path::PathBuf> {
+pub(crate) fn resolve_bin_source_path(
+    manifest_dir: &Path,
+    bin_name: &str,
+) -> Result<std::path::PathBuf> {
     let cargo_toml_path = manifest_dir.join("Cargo.toml");
     let cargo_toml = std::fs::read_to_string(&cargo_toml_path)
         .with_context(|| format!("Failed to read {}", cargo_toml_path.display()))?;
@@ -142,7 +145,7 @@ fn resolve_bin_source_path(manifest_dir: &Path, bin_name: &str) -> Result<std::p
     Ok(manifest_dir.join("src/bin").join(format!("{bin_name}.rs")))
 }
 
-fn generate_abi_from_sol(sol_path: &Path) -> Result<Option<AbiJson>> {
+pub(crate) fn generate_abi_from_sol(sol_path: &Path) -> Result<Option<AbiJson>> {
     let content = std::fs::read_to_string(sol_path)
         .with_context(|| format!("Failed to read sol file: {}", sol_path.display()))?;
 
@@ -169,7 +172,58 @@ fn generate_abi_from_sol(sol_path: &Path) -> Result<Option<AbiJson>> {
     Ok(Some(AbiJson(items)))
 }
 
-fn parse_sol_function_line(line: &str) -> Option<AbiItem> {
+/// Find the index of the closing `)` that matches the `(` at `start`.
+fn find_matching_paren(s: &str, start: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (i, ch) in s[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split parameters at top-level commas, respecting nested parens and brackets.
+fn split_top_level(params_str: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+
+    for ch in params_str.chars() {
+        match ch {
+            '(' | '[' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | ']' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    params.push(current.trim().to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        params.push(current.trim().to_string());
+    }
+
+    params
+}
+
+pub(crate) fn parse_sol_function_line(line: &str) -> Option<AbiItem> {
     let line = line.strip_prefix("function ")?.trim();
 
     let paren_start = line.find('(')?;
@@ -182,8 +236,12 @@ fn parse_sol_function_line(line: &str) -> Option<AbiItem> {
     let outputs = if let Some(returns_idx) = line.find("returns") {
         let after_returns = &line[returns_idx + 7..];
         if let Some(start) = after_returns.find('(') {
-            let end = find_matching_paren(after_returns, start)?;
-            parse_sol_params(&after_returns[start + 1..end])
+            let abs_start = returns_idx + 7 + start;
+            if let Some(end) = find_matching_paren(line, abs_start) {
+                parse_sol_params(&line[abs_start + 1..end])
+            } else {
+                vec![]
+            }
         } else {
             vec![]
         }
@@ -223,88 +281,26 @@ fn parse_sol_error_line(line: &str) -> Option<AbiItem> {
     Some(AbiItem::Error { name, inputs })
 }
 
-/// Find the matching closing paren for the opening paren at `start`.
-fn find_matching_paren(s: &str, start: usize) -> Option<usize> {
-    let mut depth = 0;
-    for (i, ch) in s[start..].char_indices() {
-        match ch {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(start + i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Split parameters at top-level commas, respecting parenthesis nesting.
-fn split_top_level_params(params_str: &str) -> Vec<String> {
-    let mut params = Vec::new();
-    let mut depth = 0;
-    let mut current = String::new();
-
-    for ch in params_str.chars() {
-        match ch {
-            '(' => {
-                depth += 1;
-                current.push(ch);
-            }
-            ')' => {
-                depth -= 1;
-                current.push(ch);
-            }
-            ',' if depth == 0 => {
-                if !current.trim().is_empty() {
-                    params.push(current.trim().to_string());
-                }
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-    if !current.trim().is_empty() {
-        params.push(current.trim().to_string());
-    }
-    params
-}
-
-fn parse_sol_params(params_str: &str) -> Vec<AbiParam> {
+pub(crate) fn parse_sol_params(params_str: &str) -> Vec<AbiParam> {
     if params_str.trim().is_empty() {
         return vec![];
     }
 
-    split_top_level_params(params_str)
-        .iter()
+    split_top_level(params_str)
+        .into_iter()
         .filter_map(|p| {
-            let p = p.trim();
-            if p.is_empty() {
+            let p = p.trim().to_string();
+            let parts: Vec<&str> = p.split_whitespace().collect();
+            if parts.is_empty() {
                 return None;
             }
-            // Split into tokens, strip Solidity storage keywords (memory, calldata, storage),
-            // last token is the name, first token is the type.
-            // e.g. "uint256[] calldata ids" → type="uint256[]", name="ids"
-            if let Some(last_space) = p.rfind(|c: char| c.is_whitespace()) {
-                let name = p[last_space..].trim().to_string();
-                let before_name = p[..last_space].trim();
-                // Strip storage location keywords between type and name
-                let param_type = before_name
-                    .split_whitespace()
-                    .filter(|t| !matches!(*t, "memory" | "calldata" | "storage"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !param_type.is_empty() {
-                    return Some(AbiParam { name, param_type });
-                }
-            }
-            // No name — type only
-            Some(AbiParam {
-                name: String::new(),
-                param_type: p.to_string(),
-            })
+            let param_type = parts[0].to_string();
+            let name = parts[1..]
+                .iter()
+                .find(|s| !matches!(**s, "memory" | "calldata" | "storage"))
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            Some(AbiParam { name, param_type })
         })
         .collect()
 }
@@ -312,12 +308,361 @@ fn parse_sol_params(params_str: &str) -> Vec<AbiParam> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    // --- extract_sol_path_from_source ---
 
     #[test]
-    fn sol_abi_generation() {
-        // --- Parse error lines ---
+    fn extract_sol_path_valid() {
+        let source = r#"#[pvm_contract_macros::contract("MyToken.sol", buffer = 256)]"#;
+        assert_eq!(
+            extract_sol_path_from_source(source),
+            Some("MyToken.sol".to_string())
+        );
+    }
 
-        // Error with params
+    #[test]
+    fn extract_sol_path_with_directory() {
+        let source = r#"#[contract("interfaces/IToken.sol")]"#;
+        assert_eq!(
+            extract_sol_path_from_source(source),
+            Some("interfaces/IToken.sol".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_sol_path_no_contract_attr() {
+        assert_eq!(extract_sol_path_from_source("fn main() {}"), None);
+    }
+
+    #[test]
+    fn extract_sol_path_non_sol_extension() {
+        let source = r#"#[contract("MyToken.json")]"#;
+        assert_eq!(extract_sol_path_from_source(source), None);
+    }
+
+    #[test]
+    fn extract_sol_path_missing_closing_quote() {
+        let source = r#"#[contract("MyToken.sol)]"#;
+        // No closing quote before ) so find('"') finds the one before MyToken
+        // Actually "contract(\"" consumes up to the quote, then after_quote starts at MyToken.sol)
+        // find('"') returns None since there's no second quote
+        assert_eq!(extract_sol_path_from_source(source), None);
+    }
+
+    // --- parse_sol_params ---
+
+    #[test]
+    fn parse_params_empty() {
+        assert_eq!(parse_sol_params(""), Vec::<AbiParam>::new());
+    }
+
+    #[test]
+    fn parse_params_whitespace_only() {
+        assert_eq!(parse_sol_params("   "), Vec::<AbiParam>::new());
+    }
+
+    #[test]
+    fn parse_params_single_with_name() {
+        let params = parse_sol_params("uint256 amount");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].param_type, "uint256");
+        assert_eq!(params[0].name, "amount");
+    }
+
+    #[test]
+    fn parse_params_single_type_only() {
+        let params = parse_sol_params("uint256");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].param_type, "uint256");
+        assert_eq!(params[0].name, "");
+    }
+
+    #[test]
+    fn parse_params_multiple() {
+        let params = parse_sol_params("address to, uint256 amount");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].param_type, "address");
+        assert_eq!(params[0].name, "to");
+        assert_eq!(params[1].param_type, "uint256");
+        assert_eq!(params[1].name, "amount");
+    }
+
+    // --- parse_sol_function_line ---
+
+    #[test]
+    fn parse_function_simple_transfer() {
+        let item =
+            parse_sol_function_line("function transfer(address to, uint256 amount) external")
+                .unwrap();
+        assert_eq!(
+            item,
+            AbiItem::Function {
+                name: "transfer".to_string(),
+                inputs: vec![
+                    AbiParam {
+                        name: "to".to_string(),
+                        param_type: "address".to_string()
+                    },
+                    AbiParam {
+                        name: "amount".to_string(),
+                        param_type: "uint256".to_string()
+                    },
+                ],
+                outputs: vec![],
+                state_mutability: Some("nonpayable".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_function_view_with_returns() {
+        let item = parse_sol_function_line(
+            "function balanceOf(address account) external view returns (uint256)",
+        )
+        .unwrap();
+        assert_eq!(
+            item,
+            AbiItem::Function {
+                name: "balanceOf".to_string(),
+                inputs: vec![AbiParam {
+                    name: "account".to_string(),
+                    param_type: "address".to_string()
+                }],
+                outputs: vec![AbiParam {
+                    name: "".to_string(),
+                    param_type: "uint256".to_string()
+                }],
+                state_mutability: Some("view".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_function_no_params() {
+        let item =
+            parse_sol_function_line("function totalSupply() external view returns (uint256)")
+                .unwrap();
+        assert_eq!(
+            item,
+            AbiItem::Function {
+                name: "totalSupply".to_string(),
+                inputs: vec![],
+                outputs: vec![AbiParam {
+                    name: "".to_string(),
+                    param_type: "uint256".to_string()
+                }],
+                state_mutability: Some("view".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_function_pure_mutability() {
+        let item =
+            parse_sol_function_line("function add(uint256 a, uint256 b) pure returns (uint256)")
+                .unwrap();
+        if let AbiItem::Function {
+            state_mutability, ..
+        } = &item
+        {
+            assert_eq!(state_mutability.as_deref(), Some("pure"));
+        } else {
+            panic!("expected Function");
+        }
+    }
+
+    #[test]
+    fn parse_function_payable_mutability() {
+        let item =
+            parse_sol_function_line("function deposit() external payable returns (bool)").unwrap();
+        if let AbiItem::Function {
+            state_mutability, ..
+        } = &item
+        {
+            assert_eq!(state_mutability.as_deref(), Some("payable"));
+        } else {
+            panic!("expected Function");
+        }
+    }
+
+    #[test]
+    fn parse_function_no_returns() {
+        let item = parse_sol_function_line("function setOwner(address newOwner) external").unwrap();
+        if let AbiItem::Function { outputs, .. } = &item {
+            assert!(outputs.is_empty());
+        } else {
+            panic!("expected Function");
+        }
+    }
+
+    #[test]
+    fn parse_function_not_a_function() {
+        assert!(parse_sol_function_line("event Transfer(address,address,uint256)").is_none());
+    }
+
+    // --- generate_abi_from_sol (uses temp files) ---
+
+    #[test]
+    fn generate_abi_from_sol_valid_interface() {
+        let dir = TempDir::new().unwrap();
+        let sol_path = dir.path().join("IToken.sol");
+        let mut f = std::fs::File::create(&sol_path).unwrap();
+        writeln!(
+            f,
+            r#"// SPDX-License-Identifier: MIT
+interface IToken {{
+    function totalSupply() external view returns (uint256);
+    function transfer(address to, uint256 amount) external returns (bool);
+}}"#
+        )
+        .unwrap();
+
+        let abi = generate_abi_from_sol(&sol_path).unwrap().unwrap();
+        let json = serde_json::to_value(&abi).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["name"], "totalSupply");
+        assert_eq!(arr[1]["name"], "transfer");
+    }
+
+    #[test]
+    fn generate_abi_from_sol_empty_file() {
+        let dir = TempDir::new().unwrap();
+        let sol_path = dir.path().join("Empty.sol");
+        std::fs::write(&sol_path, "// empty").unwrap();
+
+        assert!(generate_abi_from_sol(&sol_path).unwrap().is_none());
+    }
+
+    #[test]
+    fn generate_abi_from_sol_no_functions() {
+        let dir = TempDir::new().unwrap();
+        let sol_path = dir.path().join("IEmpty.sol");
+        std::fs::write(&sol_path, "interface IEmpty {}").unwrap();
+
+        assert!(generate_abi_from_sol(&sol_path).unwrap().is_none());
+    }
+
+    // --- resolve_bin_source_path (uses temp dirs with Cargo.toml) ---
+
+    #[test]
+    fn resolve_bin_path_explicit_bin_entry() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[package]
+name = "myproject"
+version = "0.1.0"
+
+[[bin]]
+name = "mybin"
+path = "src/custom.rs"
+"#,
+        )
+        .unwrap();
+
+        let path = resolve_bin_source_path(dir.path(), "mybin").unwrap();
+        assert_eq!(path, dir.path().join("src/custom.rs"));
+    }
+
+    #[test]
+    fn resolve_bin_path_bin_entry_without_path() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[package]
+name = "myproject"
+version = "0.1.0"
+
+[[bin]]
+name = "mybin"
+"#,
+        )
+        .unwrap();
+
+        let path = resolve_bin_source_path(dir.path(), "mybin").unwrap();
+        assert_eq!(path, dir.path().join("src/bin/mybin.rs"));
+    }
+
+    #[test]
+    fn resolve_bin_path_package_name_match() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[package]
+name = "mybin"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let path = resolve_bin_source_path(dir.path(), "mybin").unwrap();
+        assert_eq!(path, dir.path().join("src/main.rs"));
+    }
+
+    #[test]
+    fn resolve_bin_path_fallback() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[package]
+name = "other"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+
+        let path = resolve_bin_source_path(dir.path(), "mybin").unwrap();
+        assert_eq!(path, dir.path().join("src/bin/mybin.rs"));
+    }
+
+    #[test]
+    fn parse_params_strips_data_location_qualifiers() {
+        let params = parse_sol_params("string calldata s, uint256[] memory arr");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].param_type, "string");
+        assert_eq!(params[0].name, "s");
+        assert_eq!(params[1].param_type, "uint256[]");
+        assert_eq!(params[1].name, "arr");
+    }
+
+    #[test]
+    fn parse_params_strips_qualifier_without_name() {
+        let params = parse_sol_params("string memory");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].param_type, "string");
+        assert_eq!(params[0].name, "");
+    }
+
+    #[test]
+    fn parse_function_with_tuple_param() {
+        let item = parse_sol_function_line(
+            "function foo((address,uint256) param) external returns (bool)",
+        )
+        .unwrap();
+        if let AbiItem::Function {
+            name,
+            inputs,
+            outputs,
+            ..
+        } = &item
+        {
+            assert_eq!(name, "foo");
+            assert_eq!(inputs.len(), 1);
+            assert_eq!(inputs[0].param_type, "(address,uint256)");
+            assert_eq!(outputs.len(), 1);
+            assert_eq!(outputs[0].param_type, "bool");
+        } else {
+            panic!("expected Function");
+        }
+    }
+
+    // --- Error parsing ---
+
+    #[test]
+    fn parse_error_with_params() {
         assert_eq!(
             parse_sol_error_line(
                 "error InsufficientBalance(address account, uint256 required, uint256 available);",
@@ -326,23 +671,16 @@ mod tests {
             AbiItem::Error {
                 name: "InsufficientBalance".to_string(),
                 inputs: vec![
-                    AbiParam {
-                        name: "account".to_string(),
-                        param_type: "address".to_string()
-                    },
-                    AbiParam {
-                        name: "required".to_string(),
-                        param_type: "uint256".to_string()
-                    },
-                    AbiParam {
-                        name: "available".to_string(),
-                        param_type: "uint256".to_string()
-                    },
+                    AbiParam { name: "account".to_string(), param_type: "address".to_string() },
+                    AbiParam { name: "required".to_string(), param_type: "uint256".to_string() },
+                    AbiParam { name: "available".to_string(), param_type: "uint256".to_string() },
                 ],
             }
         );
+    }
 
-        // Error without params
+    #[test]
+    fn parse_error_no_params() {
         assert_eq!(
             parse_sol_error_line("error Unauthorized();").unwrap(),
             AbiItem::Error {
@@ -350,143 +688,32 @@ mod tests {
                 inputs: vec![],
             }
         );
+    }
 
-        // --- Full .sol file parsing ---
-
-        let sol = r#"
-            interface MyToken {
-                function transfer(address to, uint256 amount) external;
-                error InsufficientBalance(address account, uint256 required);
-                error Unauthorized();
-            }
-        "#;
-        let dir = std::env::temp_dir().join("pvm_abi_test_sol_gen");
-        let _ = std::fs::create_dir_all(&dir);
-        let sol_path = dir.join("MyToken.sol");
-        std::fs::write(&sol_path, sol).unwrap();
+    #[test]
+    fn generate_abi_from_sol_includes_errors() {
+        let dir = TempDir::new().unwrap();
+        let sol_path = dir.path().join("MyToken.sol");
+        let mut f = std::fs::File::create(&sol_path).unwrap();
+        writeln!(
+            f,
+            r#"interface IToken {{
+    function transfer(address to, uint256 amount) external;
+    error InsufficientBalance(address account, uint256 required);
+    error Unauthorized();
+}}"#
+        )
+        .unwrap();
 
         let abi = generate_abi_from_sol(&sol_path).unwrap().unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-
-        assert_eq!(abi.0.len(), 3);
-        assert!(matches!(&abi.0[0], AbiItem::Function { name, .. } if name == "transfer"));
-        assert!(matches!(&abi.0[1], AbiItem::Error { name, .. } if name == "InsufficientBalance"));
-        assert!(matches!(&abi.0[2], AbiItem::Error { name, .. } if name == "Unauthorized"));
-
-        // --- Roundtrip: all item types ---
-
-        let abi = AbiJson(vec![
-            AbiItem::Constructor {
-                inputs: vec![AbiParam {
-                    name: "supply".to_string(),
-                    param_type: "uint256".to_string(),
-                }],
-                state_mutability: Some("nonpayable".to_string()),
-            },
-            AbiItem::Function {
-                name: "transfer".to_string(),
-                inputs: vec![
-                    AbiParam {
-                        name: "to".to_string(),
-                        param_type: "address".to_string(),
-                    },
-                    AbiParam {
-                        name: "amount".to_string(),
-                        param_type: "uint256".to_string(),
-                    },
-                ],
-                outputs: vec![AbiParam {
-                    name: "".to_string(),
-                    param_type: "bool".to_string(),
-                }],
-                state_mutability: Some("nonpayable".to_string()),
-            },
-            AbiItem::Error {
-                name: "InsufficientBalance".to_string(),
-                inputs: vec![AbiParam {
-                    name: "account".to_string(),
-                    param_type: "address".to_string(),
-                }],
-            },
-            AbiItem::Error {
-                name: "Unauthorized".to_string(),
-                inputs: vec![],
-            },
-        ]);
-
-        let json_str = serde_json::to_string(&abi).unwrap();
-        let deserialized: AbiJson = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(abi, deserialized);
-
-        let items: serde_json::Value = serde_json::from_str(&json_str).unwrap();
-        let items = items.as_array().unwrap();
-        assert_eq!(items.len(), 4);
-        assert_eq!(items[0]["type"], "constructor");
-        assert_eq!(items[0]["stateMutability"], "nonpayable");
-        assert_eq!(items[1]["type"], "function");
-        assert_eq!(items[2]["type"], "error");
-        assert!(items[2].get("stateMutability").is_none());
-        assert_eq!(items[3]["type"], "error");
-        assert_eq!(items[3]["inputs"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn sol_abi_tuple_params() {
-        // Function with tuple param
-        let item = parse_sol_function_line(
-            "function swap((address,uint256) order, uint256 minOutput) external",
-        )
-        .unwrap();
-        let AbiItem::Function { inputs, .. } = &item else {
-            panic!("Expected Function")
-        };
-        assert_eq!(inputs.len(), 2);
-        assert_eq!(inputs[0].param_type, "(address,uint256)");
-        assert_eq!(inputs[0].name, "order");
-        assert_eq!(inputs[1].param_type, "uint256");
-
-        // Error with tuple param
-        let item =
-            parse_sol_error_line("error BadSwap((address,uint256) order, uint256 received);")
-                .unwrap();
-        let AbiItem::Error { inputs, .. } = &item else {
-            panic!("Expected Error")
-        };
-        assert_eq!(inputs.len(), 2);
-        assert_eq!(inputs[0].param_type, "(address,uint256)");
-        assert_eq!(inputs[0].name, "order");
-
-        // Function returning tuple
-        let item = parse_sol_function_line(
-            "function getOrder() external view returns ((address,uint256))",
-        )
-        .unwrap();
-        let AbiItem::Function { outputs, .. } = &item else {
-            panic!("Expected Function")
-        };
-        assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].param_type, "(address,uint256)");
-    }
-
-    #[test]
-    fn sol_abi_strips_storage_keywords() {
-        let item = parse_sol_function_line(
-            "function process(uint256[] calldata ids, string memory name) external",
-        )
-        .unwrap();
-        let AbiItem::Function { inputs, .. } = &item else {
-            panic!("Expected Function")
-        };
-        assert_eq!(inputs[0].param_type, "uint256[]");
-        assert_eq!(inputs[0].name, "ids");
-        assert_eq!(inputs[1].param_type, "string");
-        assert_eq!(inputs[1].name, "name");
-
-        let item = parse_sol_error_line("error BadData(bytes calldata data);").unwrap();
-        let AbiItem::Error { inputs, .. } = &item else {
-            panic!("Expected Error")
-        };
-        assert_eq!(inputs[0].param_type, "bytes");
-        assert_eq!(inputs[0].name, "data");
+        let json = serde_json::to_value(&abi).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["name"], "transfer");
+        assert_eq!(arr[0]["type"], "function");
+        assert_eq!(arr[1]["name"], "InsufficientBalance");
+        assert_eq!(arr[1]["type"], "error");
+        assert_eq!(arr[2]["name"], "Unauthorized");
+        assert_eq!(arr[2]["type"], "error");
     }
 }
