@@ -8,8 +8,8 @@ Cargo subcommand and toolchain for building Rust smart contracts targeting Polka
 |-------|-------------|
 | `cargo-pvm-contract` | CLI tool — scaffolds contract projects from `.sol` files |
 | `cargo-pvm-contract-builder` | Build helper — `build.rs` integration that links PolkaVM bytecode and generates ABI JSON |
-| `pvm-contract-macros` | Proc macros — `#[contract]`, `#[method]`, `#[constructor]`, `#[fallback]`, `#[derive(SolType)]` |
-| `pvm-contract-types` | ABI encoding/decoding traits (`SolEncode`, `SolDecode`) — `no_std` compatible |
+| `pvm-contract-macros` | Proc macros — `#[contract]`, `#[method]`, `#[constructor]`, `#[fallback]`, `#[derive(SolType)]`, `#[derive(SolError)]` |
+| `pvm-contract-types` | ABI encoding/decoding traits (`SolEncode`, `SolDecode`), error traits (`SolError`, `SolRevert`) — `no_std` compatible |
 | `pvm-contract-builder-dsl` | Builder-pattern DSL for contracts without proc macros |
 | `pvm-contract-benchmarks` | Binary size comparison tool for CI regression detection |
 
@@ -74,7 +74,7 @@ The `#[contract]` macro generates two PolkaVM entry points:
 - **`deploy()`** — calls the `#[constructor]` function
 - **`call()`** — reads calldata, extracts 4-byte selector, dispatches to matching `#[method]`
 
-Each method dispatch arm: validates input size -> decodes parameters via `SolDecode` -> calls user function -> encodes return via `SolEncode` -> returns to host.
+Each method dispatch arm: validates input size -> decodes parameters via `SolDecode` -> calls user function -> encodes return via `SolEncode` -> returns to host. If the user function returns `Err(e)`, the error is encoded via `SolRevert::revert_data` and returned with `REVERT` flags.
 
 Selectors are Keccak-256 of the canonical Solidity signature (first 4 bytes), computed at compile time.
 
@@ -129,6 +129,30 @@ pub trait StaticEncodedLen: SolEncode {
     const ENCODED_SIZE: usize;  // compile-time known size, used for stack buffers
 }
 ```
+
+### Error Traits (`pvm-contract-types`)
+
+```rust
+pub trait SolError {
+    const SELECTOR: [u8; 4];       // keccak256 of canonical signature, first 4 bytes
+    const SIGNATURE: &'static str; // e.g. "InsufficientBalance(address,uint256,uint256)"
+    fn encode_params(&self, buf: &mut [u8]) -> usize;  // ABI-encode fields after selector
+    fn encoded_size(&self) -> usize;                    // 4 + encoded params size
+}
+
+pub trait SolRevert {
+    fn revert_data(&self, buf: &mut [u8]) -> usize;    // selector + encode_params
+    fn revert_data_len(&self) -> usize;                 // total revert data size
+    fn error_signatures() -> &'static [&'static str];   // for ABI JSON generation
+}
+```
+
+- `SolError` — implemented per error struct (single selector). Use `#[derive(SolError)]`.
+- `SolRevert` — dispatch boundary trait. Blanket impl for `T: SolError`. Manual impl for error enums via `sol_revert_enum!`.
+- `RevertString` — encodes `Error(string)` with truncation for buffer safety.
+- `Panic` — encodes `Panic(uint256)` for overflow/division-by-zero.
+- `EmptyError` — zero-cost uninhabited type for contracts with no error paths.
+- `sol_revert_enum!` — generates error enum + `SolRevert` impl + `From` conversions, auto-injects `RevertString` and `Panic` variants.
 
 ### Type Support Matrix
 
@@ -297,7 +321,7 @@ Multi-binary project with 9+ contracts for E2E integration tests:
 - `CompositeTypes` — fixed arrays, tuples
 - `ConstructorArgs` — constructor with parameters
 - `CallerCheck` — `api::caller()` access
-- `ErrorHandling` — `Result<T, Error>` revert flow
+- `ErrorHandling` — `SolError` + `sol_revert_enum!` ABI-encoded revert flow
 
 ### Building examples
 
@@ -324,6 +348,7 @@ crates/
     src/codegen/encode.rs       (removed — encoding now handled directly in dispatch.rs)
     src/codegen/decode.rs       Parameter decoding codegen
     src/codegen/sol_type.rs     #[derive(SolType)] expansion
+    src/codegen/sol_error.rs    #[derive(SolError)] expansion
     src/signature/types.rs      Rust-to-Solidity type mapping
     src/signature/parser.rs     Solidity signature parsing
     src/signature/selector.rs   Keccak-256 selector computation
@@ -338,7 +363,8 @@ examples/
   example-mytoken/              6 MyToken variants
   test-contracts/               9+ test contracts with .sol interfaces
 specs/
-  abi.md                        ABI encoding specification
+  abi.md                        ABI encoding specification (includes error encoding)
+  builder-dsl.md                Builder DSL specification (includes RevertBuffer)
 ```
 
 ## Editing Rust Code
