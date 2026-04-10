@@ -10,21 +10,39 @@ pub use ruint;
 /// 4-byte Solidity function selector.
 pub type Selector = [u8; 4];
 
-/// Revert execution with a structured ABI-encoded error.
+/// Fixed-size stack buffer for encoding ABI-compatible revert data.
 ///
-/// Encodes the error via [`pvm_contract_types::SolRevert::revert_data`] and
-/// calls `return_value(REVERT, ...)`. Uses `SolRevert` as the bound so it
-/// works with both single [`pvm_contract_types::SolError`] types and error
-/// enums from [`pvm_contract_types::sol_revert_enum!`].
+/// Encodes errors via [`pvm_contract_types::SolRevert::revert_data`] and
+/// returns a slice of the encoded bytes. Works with both single
+/// [`pvm_contract_types::SolError`] types and error enums from
+/// [`pvm_contract_types::sol_revert_enum!`].
 ///
-/// This is a convenience for DSL handlers. The `#[contract]` macro path
-/// handles error encoding automatically in the dispatch layer.
-#[allow(unreachable_code)]
-pub fn revert_with<H: pallet_revive_uapi::HostFn, E: pvm_contract_types::SolRevert>(e: &E) -> ! {
-    let mut buf = [0u8; 256];
-    let len = e.revert_data(&mut buf);
-    H::return_value(pallet_revive_uapi::ReturnFlags::REVERT, &buf[..len]);
-    unreachable!()
+/// # Example
+///
+/// ```ignore
+/// let mut buf = RevertBuffer::<64>::new();
+/// let payload = buf.encode(&error);
+/// HostFnImpl::return_value(ReturnFlags::REVERT, payload);
+/// ```
+pub struct RevertBuffer<const N: usize> {
+    buf: [u8; N],
+}
+
+impl<const N: usize> Default for RevertBuffer<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const N: usize> RevertBuffer<N> {
+    pub fn new() -> Self {
+        Self { buf: [0; N] }
+    }
+
+    pub fn encode<'a, E: pvm_contract_types::SolRevert>(&'a mut self, e: &E) -> &'a [u8] {
+        let len = e.revert_data(&mut self.buf);
+        &self.buf[..len]
+    }
 }
 
 /// A method handler receives the calldata bytes after the 4-byte selector.

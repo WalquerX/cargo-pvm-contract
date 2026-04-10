@@ -109,7 +109,9 @@ fn transfer_handler(input: &[u8]) {
     };
 
     if sender_balance < amount {
-        pvm_contract_builder_dsl::revert_with::<HostFnImpl, _>(&InsufficientBalance);
+        let mut revert_buf = pvm_contract_builder_dsl::RevertBuffer::<64>::new();
+        let payload = revert_buf.encode(&InsufficientBalance);
+        HostFnImpl::return_value(ReturnFlags::REVERT, payload);
     }
 
     let new_sender_balance = sender_balance - amount;
