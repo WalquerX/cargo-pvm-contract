@@ -84,7 +84,7 @@ fn parse_error_line(line: &str) -> Option<SolErrorDecl> {
         let params = split_top_level(params_str);
         for param in &params {
             let (ty_str, name_str) = parse_typed_param(param)?;
-            let sol_type = sol_type_from_str(&ty_str)?;
+            let sol_type = crate::signature::FunctionSignature::parse_single_type(&ty_str).ok()?;
             param_types.push(sol_type);
             param_names.push(name_str);
         }
@@ -117,71 +117,6 @@ fn parse_typed_param(param: &str) -> Option<(String, String)> {
         }
         None => Some((param.to_string(), String::new())),
     }
-}
-
-/// Convert a Solidity type string to SolType.
-/// Handles primitives, arrays (`uint256[]`), fixed arrays (`uint256[3]`),
-/// and tuples (`(address,uint256)`).
-fn sol_type_from_str(ty: &str) -> Option<SolType> {
-    let ty = ty.trim();
-
-    // Tuple: (type1,type2,...)
-    if ty.starts_with('(') {
-        let close = find_matching_paren(ty, 0)?;
-        let inner = &ty[1..close];
-        let elem_types = split_top_level(inner)
-            .into_iter()
-            .map(|t| sol_type_from_str(&t))
-            .collect::<Option<Vec<_>>>()?;
-
-        // Check for array suffix after the tuple: (type1,type2)[] or (type1,type2)[3]
-        let suffix = &ty[close + 1..];
-        return wrap_with_array_suffix(SolType::Tuple(elem_types), suffix);
-    }
-
-    // Array suffix: base_type[] or base_type[N]
-    if let Some(bracket_pos) = ty.rfind('[') {
-        let base = &ty[..bracket_pos];
-        let suffix = &ty[bracket_pos..];
-        let inner = sol_type_from_str(base)?;
-        return wrap_with_array_suffix(inner, suffix);
-    }
-
-    match ty {
-        "address" => Some(SolType::Address),
-        "bool" => Some(SolType::Bool),
-        "string" => Some(SolType::String),
-        "bytes" => Some(SolType::DynBytes),
-        t if t.starts_with("uint") => {
-            let bits: usize = t[4..].parse().unwrap_or(256);
-            Some(SolType::Uint(bits))
-        }
-        t if t.starts_with("int") => {
-            let bits: usize = t[3..].parse().unwrap_or(256);
-            Some(SolType::Int(bits))
-        }
-        t if t.starts_with("bytes") => {
-            let size: usize = t[5..].parse().ok()?;
-            Some(SolType::Bytes(size))
-        }
-        _ => None,
-    }
-}
-
-/// Wrap a SolType with array suffix: `[]` → Array, `[N]` → FixedArray, empty → identity.
-fn wrap_with_array_suffix(inner: SolType, suffix: &str) -> Option<SolType> {
-    let suffix = suffix.trim();
-    if suffix.is_empty() {
-        return Some(inner);
-    }
-    if suffix == "[]" {
-        return Some(SolType::Array(Box::new(inner)));
-    }
-    if suffix.starts_with('[') && suffix.ends_with(']') {
-        let size: usize = suffix[1..suffix.len() - 1].parse().ok()?;
-        return Some(SolType::FixedArray(Box::new(inner), size));
-    }
-    None
 }
 
 fn parse_function_line(line: &str) -> Option<SolFunction> {
@@ -400,67 +335,6 @@ mod tests {
         assert!(err.param_types.is_empty());
     }
 
-    #[test]
-    fn test_sol_type_from_str() {
-        // Primitives
-        assert!(matches!(
-            sol_type_from_str("address"),
-            Some(SolType::Address)
-        ));
-        assert!(matches!(sol_type_from_str("bool"), Some(SolType::Bool)));
-        assert!(matches!(
-            sol_type_from_str("uint256"),
-            Some(SolType::Uint(256))
-        ));
-        assert!(matches!(
-            sol_type_from_str("uint64"),
-            Some(SolType::Uint(64))
-        ));
-        assert!(matches!(
-            sol_type_from_str("int128"),
-            Some(SolType::Int(128))
-        ));
-        assert!(matches!(
-            sol_type_from_str("bytes32"),
-            Some(SolType::Bytes(32))
-        ));
-        assert!(matches!(sol_type_from_str("string"), Some(SolType::String)));
-        assert!(matches!(
-            sol_type_from_str("bytes"),
-            Some(SolType::DynBytes)
-        ));
-
-        // Dynamic arrays
-        let ty = sol_type_from_str("uint256[]").unwrap();
-        assert!(matches!(ty, SolType::Array(inner) if matches!(*inner, SolType::Uint(256))));
-
-        // Fixed arrays
-        let ty = sol_type_from_str("address[3]").unwrap();
-        assert!(matches!(ty, SolType::FixedArray(inner, 3) if matches!(*inner, SolType::Address)));
-
-        // Tuples
-        let ty = sol_type_from_str("(address,uint256)").unwrap();
-        if let SolType::Tuple(types) = ty {
-            assert_eq!(types.len(), 2);
-            assert!(matches!(types[0], SolType::Address));
-            assert!(matches!(types[1], SolType::Uint(256)));
-        } else {
-            panic!("Expected Tuple");
-        }
-
-        // Tuple array
-        let ty = sol_type_from_str("(address,uint256)[]").unwrap();
-        assert!(matches!(ty, SolType::Array(inner) if matches!(*inner, SolType::Tuple(_))));
-
-        // Nested tuple
-        let ty = sol_type_from_str("((uint64,uint64),uint256)").unwrap();
-        if let SolType::Tuple(types) = ty {
-            assert_eq!(types.len(), 2);
-            assert!(matches!(&types[0], SolType::Tuple(inner) if inner.len() == 2));
-        } else {
-            panic!("Expected nested Tuple");
-        }
-    }
 
     #[test]
     fn test_parse_error_with_tuple_param() {

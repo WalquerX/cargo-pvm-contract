@@ -37,6 +37,36 @@ fn encode_params_size() {
     assert_eq!(len, 96); // 3 x 32 bytes
 }
 
+mod alloy_cross_check {
+    alloy_core::sol! { error InsufficientBalance(address account, uint256 required, uint256 available); }
+
+    #[test]
+    fn encoding_matches_alloy() {
+        use alloy_core::sol_types::SolError as AlloySolError;
+        use pvm_contract_types::{Address, SolRevert};
+        use ruint::aliases::U256;
+
+        // Encode with our SolError derive
+        let error = crate::InsufficientBalance {
+            account: Address([0xAB; 20]),
+            required: U256::from(1000u64),
+            available: U256::from(500u64),
+        };
+        let mut buf = [0u8; 256];
+        let len = error.revert_data(&mut buf);
+
+        // Encode with alloy's sol! error
+        let alloy_encoded = InsufficientBalance {
+            account: alloy_core::primitives::Address::from([0xAB; 20]),
+            required: alloy_core::primitives::U256::from(1000u64),
+            available: alloy_core::primitives::U256::from(500u64),
+        }
+        .abi_encode();
+
+        assert_eq!(&buf[..len], &alloy_encoded[..]);
+    }
+}
+
 #[test]
 fn encoded_size_includes_selector() {
     let error = InsufficientBalance {

@@ -318,29 +318,29 @@ mod tests {
         // --- Parse error lines ---
 
         // Error with params
-        let item = parse_sol_error_line(
-            "error InsufficientBalance(address account, uint256 required, uint256 available);",
-        )
-        .unwrap();
-        let AbiItem::Error { name, inputs } = &item else {
-            panic!("Expected AbiItem::Error")
-        };
-        assert_eq!(name, "InsufficientBalance");
-        assert_eq!(inputs.len(), 3);
-        assert_eq!(inputs[0].param_type, "address");
-        assert_eq!(inputs[0].name, "account");
-        assert_eq!(inputs[1].param_type, "uint256");
-        assert_eq!(inputs[1].name, "required");
-        assert_eq!(inputs[2].param_type, "uint256");
-        assert_eq!(inputs[2].name, "available");
+        assert_eq!(
+            parse_sol_error_line(
+                "error InsufficientBalance(address account, uint256 required, uint256 available);",
+            )
+            .unwrap(),
+            AbiItem::Error {
+                name: "InsufficientBalance".to_string(),
+                inputs: vec![
+                    AbiParam { name: "account".to_string(), param_type: "address".to_string() },
+                    AbiParam { name: "required".to_string(), param_type: "uint256".to_string() },
+                    AbiParam { name: "available".to_string(), param_type: "uint256".to_string() },
+                ],
+            }
+        );
 
         // Error without params
-        let item = parse_sol_error_line("error Unauthorized();").unwrap();
-        let AbiItem::Error { name, inputs } = &item else {
-            panic!("Expected AbiItem::Error")
-        };
-        assert_eq!(name, "Unauthorized");
-        assert!(inputs.is_empty());
+        assert_eq!(
+            parse_sol_error_line("error Unauthorized();").unwrap(),
+            AbiItem::Error {
+                name: "Unauthorized".to_string(),
+                inputs: vec![],
+            }
+        );
 
         // --- Full .sol file parsing ---
 
