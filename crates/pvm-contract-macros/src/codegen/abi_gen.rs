@@ -253,7 +253,7 @@ mod tests {
             constructor_returns_result: false,
             constructor_inputs: vec![],
             fallback_name: None,
-
+            fallback_returns_result: false,
             error_types: vec![],
         };
 

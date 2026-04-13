@@ -128,6 +128,7 @@ pub(super) struct ParsedContract {
     pub(super) constructor_returns_result: bool,
     pub(super) constructor_inputs: Vec<(Ident, syn::Type)>,
     pub(super) fallback_name: Option<Ident>,
+    pub(super) fallback_returns_result: bool,
     /// Error types from `Result<T, E>` return types, for ABI generation.
     pub(super) error_types: Vec<syn::Type>,
 }
@@ -321,6 +322,7 @@ fn parse_contract(
     let mut constructor_returns_result = false;
     let mut constructor_inputs = Vec::new();
     let mut fallback_name = None;
+    let mut fallback_returns_result = false;
     let mut implemented_sol_methods = Vec::new();
     let mut error_types: Vec<syn::Type> = Vec::new();
     let mut seen_error_names: Vec<String> = Vec::new();
@@ -336,6 +338,7 @@ fn parse_contract(
             } else if has_pvm_attr(&func.attrs, "fallback") {
                 has_fallback = true;
                 fallback_name = Some(func.sig.ident.clone());
+                fallback_returns_result = is_result_return_type(&func.sig.output);
                 collect_error_type(&func.sig.output, &mut error_types, &mut seen_error_names);
             } else if has_pvm_attr(&func.attrs, "method") {
                 let typed_params = extract_typed_params(&func.sig.inputs)?;
@@ -414,6 +417,7 @@ fn parse_contract(
         constructor_returns_result,
         constructor_inputs,
         fallback_name,
+        fallback_returns_result,
         error_types,
     })
 }
@@ -584,13 +588,20 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
 
     let fallback_handler = if parsed.has_fallback {
         let fallback_name = parsed.fallback_name.as_ref().unwrap();
-        let revert_err = generate_revert_encoding(use_alloc);
-        quote! {
-            match #fallback_name() {
-                Ok(()) => return,
-                Err(e) => {
-                    #revert_err
+        if parsed.fallback_returns_result {
+            let revert_err = generate_revert_encoding(use_alloc);
+            quote! {
+                match #fallback_name() {
+                    Ok(()) => return,
+                    Err(e) => {
+                        #revert_err
+                    }
                 }
+            }
+        } else {
+            quote! {
+                #fallback_name();
+                return;
             }
         }
     } else {
@@ -893,6 +904,36 @@ mod tests {
         assert!(
             !output.contains("as_ref"),
             "Generated dispatch should not use as_ref for error encoding"
+        );
+    }
+
+    #[test]
+    fn fallback_with_unit_return_generates_plain_call() {
+        let item: ItemMod = syn::parse_str(
+            r#"
+            mod my_contract {
+                #[pvm_contract_macros::constructor]
+                pub fn new() {}
+
+                #[pvm_contract_macros::fallback]
+                pub fn fallback() {}
+            }
+        "#,
+        )
+        .unwrap();
+
+        let output = expand_contract(ContractArgs::default(), item)
+            .unwrap()
+            .to_string();
+
+        // Unit-return fallback should generate a plain call, not a match on Ok/Err
+        assert!(
+            output.contains("fallback ()"),
+            "Unit-return fallback should generate a direct call"
+        );
+        assert!(
+            !output.contains("match fallback"),
+            "Unit-return fallback should not generate a match expression"
         );
     }
 }
