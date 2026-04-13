@@ -1240,6 +1240,7 @@ dependencies = [
  "anyhow",
  "log",
  "polkavm-linker",
+ "pvm-contract-types",
  "serde",
  "serde_json",
  "tempfile",

@@ -169,6 +169,20 @@ pub(crate) fn generate_abi_from_sol(sol_path: &Path) -> Result<Option<AbiJson>> 
         return Ok(None);
     }
 
+    // Append framework-level parameterless custom errors, unless the .sol
+    // interface already defines an error with the same name.
+    for name in pvm_contract_types::framework_errors::NAMES {
+        let already_defined = items
+            .iter()
+            .any(|item| matches!(item, AbiItem::Error { name: n, .. } if n == name));
+        if !already_defined {
+            items.push(AbiItem::Error {
+                name: name.to_string(),
+                inputs: vec![],
+            });
+        }
+    }
+
     Ok(Some(AbiJson(items)))
 }
 
@@ -522,9 +536,17 @@ interface IToken {{
         let abi = generate_abi_from_sol(&sol_path).unwrap().unwrap();
         let json = serde_json::to_value(&abi).unwrap();
         let arr = json.as_array().unwrap();
-        assert_eq!(arr.len(), 2);
+        assert_eq!(arr.len(), 6);
         assert_eq!(arr[0]["name"], "totalSupply");
         assert_eq!(arr[1]["name"], "transfer");
+        assert_eq!(arr[2]["name"], "InvalidCalldata");
+        assert_eq!(arr[2]["type"], "error");
+        assert_eq!(arr[3]["name"], "CalldataTooLarge");
+        assert_eq!(arr[3]["type"], "error");
+        assert_eq!(arr[4]["name"], "NoSelector");
+        assert_eq!(arr[4]["type"], "error");
+        assert_eq!(arr[5]["name"], "UnknownSelector");
+        assert_eq!(arr[5]["type"], "error");
     }
 
     #[test]
@@ -717,12 +739,20 @@ version = "0.1.0"
         let abi = generate_abi_from_sol(&sol_path).unwrap().unwrap();
         let json = serde_json::to_value(&abi).unwrap();
         let arr = json.as_array().unwrap();
-        assert_eq!(arr.len(), 3);
+        assert_eq!(arr.len(), 7);
         assert_eq!(arr[0]["name"], "transfer");
         assert_eq!(arr[0]["type"], "function");
         assert_eq!(arr[1]["name"], "InsufficientBalance");
         assert_eq!(arr[1]["type"], "error");
         assert_eq!(arr[2]["name"], "Unauthorized");
         assert_eq!(arr[2]["type"], "error");
+        assert_eq!(arr[3]["name"], "InvalidCalldata");
+        assert_eq!(arr[3]["type"], "error");
+        assert_eq!(arr[4]["name"], "CalldataTooLarge");
+        assert_eq!(arr[4]["type"], "error");
+        assert_eq!(arr[5]["name"], "NoSelector");
+        assert_eq!(arr[5]["type"], "error");
+        assert_eq!(arr[6]["name"], "UnknownSelector");
+        assert_eq!(arr[6]["type"], "error");
     }
 }

@@ -143,6 +143,33 @@ pub const fn const_selector(sig: &str) -> [u8; 4] {
     [hash[0], hash[1], hash[2], hash[3]]
 }
 
+/// ABI-compatible parameterless custom errors for framework-level reverts.
+///
+/// Each constant is `keccak256("ErrorName()")[0..4]`. Contracts revert with
+/// these 4-byte selectors instead of raw byte strings, so Ethereum tooling
+/// (Foundry, ethers, block explorers) can decode them.
+pub mod framework_errors {
+    use super::const_selector;
+
+    /// Calldata is shorter than the minimum required by the dispatched method.
+    pub const INVALID_CALLDATA: [u8; 4] = const_selector("InvalidCalldata()");
+    /// Calldata exceeds the fixed buffer size (no-alloc mode only).
+    pub const CALLDATA_TOO_LARGE: [u8; 4] = const_selector("CalldataTooLarge()");
+    /// Calldata is shorter than 4 bytes (no selector present).
+    pub const NO_SELECTOR: [u8; 4] = const_selector("NoSelector()");
+    /// The 4-byte selector does not match any method in the contract.
+    pub const UNKNOWN_SELECTOR: [u8; 4] = const_selector("UnknownSelector()");
+
+    /// Error names for ABI JSON generation. Single source of truth used by both
+    /// the proc macro (`abi_gen.rs`) and the builder (`abi.rs`).
+    pub const NAMES: &[&str] = &[
+        "InvalidCalldata",
+        "CalldataTooLarge",
+        "NoSelector",
+        "UnknownSelector",
+    ];
+}
+
 /// Selector-based dispatch trait for composable `#[contract]` routing.
 ///
 /// A `Router` implementation inspects the 4-byte selector and either handles

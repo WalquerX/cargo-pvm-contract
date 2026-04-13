@@ -483,7 +483,7 @@ The macro generates size checks before decoding:
 ```rust,ignore
 let min_size = sum of head_size() for all parameters;
 if input.len() < min_size {
-    return_value(REVERT, b"InvalidCalldata");
+    return_value(REVERT, &pvm_contract_types::framework_errors::INVALID_CALLDATA);
 }
 ```
 

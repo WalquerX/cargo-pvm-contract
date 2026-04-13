@@ -55,7 +55,8 @@ pub(super) fn generate_param_decoding(
         quote! {
             if input.len() < (#min_size_expr) {
                 pallet_revive_uapi::HostFnImpl::return_value(
-                    pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
+                    pallet_revive_uapi::ReturnFlags::REVERT,
+                    &::pvm_contract_types::framework_errors::INVALID_CALLDATA);
             }
         }
     } else {

@@ -72,12 +72,12 @@ pub extern "C" fn call() {
     let call_data_len = HostFnImpl::call_data_size() as usize;
     let mut buf = [0u8; 256];
     if call_data_len > 256 {
-        HostFnImpl::return_value(ReturnFlags::REVERT, b"CalldataTooLarge");
+        HostFnImpl::return_value(ReturnFlags::REVERT, &pvm_contract_types::framework_errors::CALLDATA_TOO_LARGE);
     }
     HostFnImpl::call_data_copy(&mut buf[..call_data_len], 0);
 
     if call_data_len < 4 {
-        HostFnImpl::return_value(ReturnFlags::REVERT, b"NoSelector");
+        HostFnImpl::return_value(ReturnFlags::REVERT, &pvm_contract_types::framework_errors::NO_SELECTOR);
     }
 
     let selector: [u8; 4] = [buf[0], buf[1], buf[2], buf[3]];
@@ -94,7 +94,7 @@ pub extern "C" fn call() {
     }
 
     // No match — custom fallback
-    HostFnImpl::return_value(ReturnFlags::REVERT, b"UnknownSelector");
+    HostFnImpl::return_value(ReturnFlags::REVERT, &pvm_contract_types::framework_errors::UNKNOWN_SELECTOR);
 }
 ```
 

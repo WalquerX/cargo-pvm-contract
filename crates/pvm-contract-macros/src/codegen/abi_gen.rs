@@ -138,6 +138,24 @@ fn generate_abi_gen_impl(parsed: &ParsedContract) -> syn::Result<(TokenStream, T
         quote! {}
     };
 
+    let framework_error_entries: Vec<TokenStream> = pvm_contract_types::framework_errors::NAMES
+        .iter()
+        .map(|name| {
+            let prefix = format!("{name}(");
+            let entry = format!("{{\"type\":\"error\",\"name\":\"{name}\",\"inputs\":[]}}");
+            quote! {
+                if !__seen_errors.iter().any(|s| s.starts_with(#prefix)) {
+                    if !__first_item {
+                        __abi.push(',');
+                    } else {
+                        __first_item = false;
+                    }
+                    __abi.push_str(#entry);
+                }
+            }
+        })
+        .collect();
+
     let helper = quote! {
         #[cfg(feature = "abi-gen")]
         #[doc(hidden)]
@@ -153,6 +171,8 @@ fn generate_abi_gen_impl(parsed: &ParsedContract) -> syn::Result<(TokenStream, T
             #(#method_entries)*
 
             #(#error_entries)*
+
+            #(#framework_error_entries)*
 
             __abi.push(']');
             __abi

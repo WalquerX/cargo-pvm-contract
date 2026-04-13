@@ -538,7 +538,8 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
                     pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+                        pallet_revive_uapi::ReturnFlags::REVERT,
+                        &::pvm_contract_types::framework_errors::CALLDATA_TOO_LARGE);
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
                 let input = &call_data[..call_data_len];
@@ -586,9 +587,9 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
     } = route_items;
     let router_impl = router_impl.tokens;
 
-    let fallback_handler = if parsed.has_fallback {
+    let (no_selector_handler, unknown_selector_handler) = if parsed.has_fallback {
         let fallback_name = parsed.fallback_name.as_ref().unwrap();
-        if parsed.fallback_returns_result {
+        let handler = if parsed.fallback_returns_result {
             let revert_err = generate_revert_encoding(use_alloc);
             quote! {
                 match #fallback_name() {
@@ -603,12 +604,21 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 #fallback_name();
                 return;
             }
-        }
+        };
+        (handler.clone(), handler)
     } else {
-        quote! {
-            pallet_revive_uapi::HostFnImpl::return_value(
-                pallet_revive_uapi::ReturnFlags::REVERT, b"");
-        }
+        (
+            quote! {
+                pallet_revive_uapi::HostFnImpl::return_value(
+                    pallet_revive_uapi::ReturnFlags::REVERT,
+                    &::pvm_contract_types::framework_errors::NO_SELECTOR);
+            },
+            quote! {
+                pallet_revive_uapi::HostFnImpl::return_value(
+                    pallet_revive_uapi::ReturnFlags::REVERT,
+                    &::pvm_contract_types::framework_errors::UNKNOWN_SELECTOR);
+            },
+        )
     };
 
     let call_fn = if use_alloc {
@@ -620,7 +630,7 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data, 0);
 
                 if call_data_len < 4 {
-                    #fallback_handler
+                    #no_selector_handler
                 }
 
                 let selector: [u8; 4] = call_data[0..4].try_into().unwrap();
@@ -631,7 +641,7 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                         pallet_revive_uapi::ReturnFlags::empty(), &[]);
                 }
 
-                #fallback_handler
+                #unknown_selector_handler
             }
         }
     } else {
@@ -643,12 +653,13 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                 let mut call_data = [0u8; #buffer_size];
                 if call_data_len > #buffer_size {
                     pallet_revive_uapi::HostFnImpl::return_value(
-                        pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+                        pallet_revive_uapi::ReturnFlags::REVERT,
+                        &::pvm_contract_types::framework_errors::CALLDATA_TOO_LARGE);
                 }
                 pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 
                 if call_data_len < 4 {
-                    #fallback_handler
+                    #no_selector_handler
                 }
 
                 let selector: [u8; 4] = call_data[0..4].try_into().unwrap();
@@ -659,7 +670,7 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
                         pallet_revive_uapi::ReturnFlags::empty(), &[]);
                 }
 
-                #fallback_handler
+                #unknown_selector_handler
             }
         }
     };

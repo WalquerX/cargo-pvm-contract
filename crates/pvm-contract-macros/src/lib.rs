@@ -201,7 +201,8 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///             __SEL_balance_of => {
 ///                 if input.len() < <Address as ::pvm_contract_types::SolEncode>::HEAD_SIZE {
 ///                     pallet_revive_uapi::HostFnImpl::return_value(
-///                         pallet_revive_uapi::ReturnFlags::REVERT, b"InvalidCalldata");
+///                         pallet_revive_uapi::ReturnFlags::REVERT,
+///                         &::pvm_contract_types::framework_errors::INVALID_CALLDATA);
 ///                 }
 ///                 let mut __decode_offset: usize = 0;
 ///                 let account = {
@@ -245,11 +246,17 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///         let mut call_data = [0u8; 512];
 ///         if call_data_len > 512 {
 ///             pallet_revive_uapi::HostFnImpl::return_value(
-///                 pallet_revive_uapi::ReturnFlags::REVERT, b"CalldataTooLarge");
+///                 pallet_revive_uapi::ReturnFlags::REVERT,
+///                 &::pvm_contract_types::framework_errors::CALLDATA_TOO_LARGE);
 ///         }
 ///         pallet_revive_uapi::HostFnImpl::call_data_copy(&mut call_data[..call_data_len], 0);
 ///
-///         if call_data_len < 4 { /* fallback handling */ }
+///         if call_data_len < 4 {
+///             // With #[fallback]: calls fallback. Without: reverts with NoSelector.
+///             pallet_revive_uapi::HostFnImpl::return_value(
+///                 pallet_revive_uapi::ReturnFlags::REVERT,
+///                 &::pvm_contract_types::framework_errors::NO_SELECTOR);
+///         }
 ///
 ///         let selector: [u8; 4] = call_data[0..4].try_into().unwrap();
 ///         let input = &call_data[4..call_data_len];
@@ -258,7 +265,10 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///             pallet_revive_uapi::HostFnImpl::return_value(
 ///                 pallet_revive_uapi::ReturnFlags::empty(), &[]);
 ///         }
-///         // fallback or revert
+///         // With #[fallback]: calls fallback. Without: reverts with UnknownSelector.
+///         pallet_revive_uapi::HostFnImpl::return_value(
+///             pallet_revive_uapi::ReturnFlags::REVERT,
+///             &::pvm_contract_types::framework_errors::UNKNOWN_SELECTOR);
 ///     }
 /// }
 ///
