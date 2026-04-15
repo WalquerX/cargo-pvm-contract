@@ -2502,6 +2502,9 @@ fn sol_default_error_question_mark_propagation() {
             assert_eq!(len, 36);
         }
         Ok(_) => panic!("expected error"),
+    }
+}
+
 // ========================================================================
 // I256 ABI tests — wire-format compatibility with alloy's `int256` encoding.
 // ========================================================================
