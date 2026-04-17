@@ -6,7 +6,7 @@ use super::abi_gen::generate_abi_gen;
 use super::dispatch::{
     MethodInfo, RouteItems, generate_param_decoding, generate_revert_encoding, generate_router,
 };
-use crate::signature::compute_selector;
+use crate::signature::{SolType, compute_selector};
 use crate::solidity::{SolInterface, parse_solidity_interface, to_snake_case};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -133,30 +133,69 @@ pub(super) struct ParsedContract {
     pub(super) error_types: Vec<syn::Type>,
 }
 
+const VALID_PREFIXES: &[&str] = &["pvm", "pvm_contract", "pvm_contract_macros"];
+
+/// Verify that a Rust method's parameters are compatible with the Solidity
+/// function it implements. Checks arity strictly, and type compatibility for
+/// non-custom types. Custom types (user-defined structs) are skipped because
+/// they're resolved via trait `SOL_NAME` at runtime — we can't statically
+/// verify them without expanding the full type graph.
+fn check_signature_compatibility(
+    func: &syn::ItemFn,
+    sol_name: &str,
+    sol_inputs: &[SolType],
+    rust_param_types: &[syn::Type],
+) -> syn::Result<()> {
+    if sol_inputs.len() != rust_param_types.len() {
+        return Err(syn::Error::new_spanned(
+            func,
+            format!(
+                "Parameter count mismatch for `{sol_name}`: Solidity expects {}, Rust has {}",
+                sol_inputs.len(),
+                rust_param_types.len()
+            ),
+        ));
+    }
+
+    for (i, (sol_ty, rust_ty)) in sol_inputs.iter().zip(rust_param_types.iter()).enumerate() {
+        let Some(rust_sol) = SolType::from_rust_type(rust_ty) else {
+            continue; // unknown rust type, let downstream codegen produce a better error
+        };
+        // Skip type check if either side involves custom types — resolved via traits at runtime
+        if sol_ty.has_custom_types() || rust_sol.has_custom_types() {
+            continue;
+        }
+        if sol_ty != &rust_sol {
+            return Err(syn::Error::new_spanned(
+                rust_ty,
+                format!(
+                    "Parameter {} type mismatch for `{sol_name}`: Solidity `{}`, Rust maps to `{}`",
+                    i,
+                    sol_ty.canonical_name(),
+                    rust_sol.canonical_name(),
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn extract_method_rename(attrs: &[Attribute]) -> Option<String> {
     for attr in attrs {
         let segments: Vec<_> = attr.path().segments.iter().collect();
         if segments.len() == 2
-            && (segments[0].ident == "pvm" || segments[0].ident == "pvm_contract")
+            && VALID_PREFIXES.contains(&segments[0].ident.to_string().as_str())
             && segments[1].ident == "method"
             && let syn::Meta::List(meta_list) = &attr.meta
-            && let Ok(nv) = syn::parse2::<syn::MetaNameValue>(meta_list.tokens.clone())
-            && nv.path.is_ident("rename")
-            && let syn::Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s),
-                ..
-            }) = &nv.value
+            && let Ok(args) = syn::parse2::<super::method::MethodArgs>(meta_list.tokens.clone())
+            && let Some(name) = args.rename
+            && !name.is_empty()
         {
-            let name = s.value();
-            if !name.is_empty() {
-                return Some(name);
-            }
+            return Some(name);
         }
     }
     None
 }
-
-const VALID_PREFIXES: &[&str] = &["pvm", "pvm_contract", "pvm_contract_macros"];
 
 fn has_pvm_attr(attrs: &[Attribute], name: &str) -> bool {
     for attr in attrs {
@@ -366,6 +405,12 @@ fn parse_contract(
                                 ),
                             )
                         })?;
+                    check_signature_compatibility(
+                        func,
+                        &sol_func.name,
+                        &sol_func.signature.inputs,
+                        &param_types,
+                    )?;
                     implemented_sol_methods.push(sol_func.name.clone());
                     let selector = compute_selector(&sol_func.signature.canonical_signature());
                     (sol_func.name.clone(), Some(selector))
@@ -721,13 +766,35 @@ fn strip_pvm_attrs(input: &ItemMod) -> TokenStream {
                             || segments[1].ident == "constructor"
                             || segments[1].ident == "fallback"))
                 });
-                quote! { #new_func }
+                // Gate user functions behind not(abi-gen): abi-gen only needs
+                // type info (`SolEncode::SOL_NAME`) — function bodies may call
+                // host APIs that don't exist on the native target used for
+                // abi-gen compilation.
+                quote! {
+                    #[cfg(not(feature = "abi-gen"))]
+                    #new_func
+                }
+            }
+            syn::Item::Use(use_item) => {
+                // Gate `use alloc::*` imports behind not(abi-gen): when the
+                // allocator's `extern crate alloc` is cfg-gated out, these
+                // would fail to resolve on the host target.
+                let use_str = quote! { #use_item }.to_string();
+                if use_str.contains("alloc ::") || use_str.contains("alloc::") {
+                    quote! {
+                        #[cfg(not(feature = "abi-gen"))]
+                        #use_item
+                    }
+                } else {
+                    quote! { #use_item }
+                }
             }
             other => quote! { #other },
         })
         .collect();
 
     quote! {
+        #[cfg(not(feature = "abi-gen"))]
         #[allow(unused_imports)]
         use ::pvm_contract_types::HostApi as _;
 
@@ -880,6 +947,43 @@ mod tests {
         // Should have match for Result error handling
         assert!(output.contains("Err (e)"));
         assert!(output.contains("REVERT"));
+    }
+
+    #[test]
+    fn user_functions_are_cfg_gated_for_abi_gen() {
+        let item: syn::ItemMod = syn::parse_str(
+            r#"
+            mod my_contract {
+                #[pvm_contract_macros::constructor]
+                pub fn new() {}
+
+                #[pvm_contract_macros::method]
+                pub fn do_something(value: U256) -> U256 {
+                    value
+                }
+            }
+        "#,
+        )
+        .unwrap();
+
+        let tokens = expand_contract(ContractArgs::default(), item).unwrap();
+        let output = tokens.to_string();
+        let pretty = prettyplease::unparse(
+            &syn::parse_file(&output).expect("expanded output should be valid Rust"),
+        );
+
+        // User functions should be gated behind not(abi-gen) so they don't
+        // compile on the host target (they may call host APIs).
+        assert!(
+            output.contains("not (feature = \"abi-gen\")"),
+            "user functions must be cfg-gated for abi-gen.\nExpanded output:\n{pretty}"
+        );
+
+        // The abi-gen helper should still reference the type for SOL_NAME
+        assert!(
+            output.contains("SOL_NAME"),
+            "abi-gen helper must reference SOL_NAME.\nExpanded output:\n{pretty}"
+        );
     }
 
     #[test]

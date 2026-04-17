@@ -83,6 +83,13 @@ fn generate_abi_via_feature(
         return generate_abi_from_sol(&sol_full_path);
     }
 
+    // ABI generation requires either a `.sol` file or the `#[contract]` macro
+    // (which generates `__abi_json()` under `--features abi-gen`). DSL-based
+    // contracts don't use the macro and are expected to handle ABI themselves.
+    if !has_contract_macro(&source_content) {
+        return Ok(None);
+    }
+
     let target_dir = match target_root {
         Some(root) => root.join("abi-gen-target"),
         None => super::get_target_root().join("abi-gen-target"),
@@ -139,6 +146,13 @@ fn generate_abi_via_feature(
         .context("Failed to parse ABI JSON from abi-gen output")?;
 
     Ok(Some(abi))
+}
+
+/// Detect whether the source uses the `#[contract]` attribute macro. Matches
+/// both `::contract]` (no args) and `::contract(` (with args). Used to skip
+/// ABI generation for DSL-based contracts that don't use the macro.
+pub(crate) fn has_contract_macro(source: &str) -> bool {
+    source.contains("::contract]") || source.contains("::contract(")
 }
 
 pub(crate) fn extract_sol_path_from_source(source: &str) -> Option<String> {
@@ -406,6 +420,32 @@ mod tests {
         // Actually "contract(\"" consumes up to the quote, then after_quote starts at MyToken.sol)
         // find('"') returns None since there's no second quote
         assert_eq!(extract_sol_path_from_source(source), None);
+    }
+
+    // --- has_contract_macro ---
+
+    #[test]
+    fn has_contract_macro_with_args() {
+        let source = r#"#[pvm_contract_macros::contract(allocator = "pico")]"#;
+        assert!(has_contract_macro(source));
+    }
+
+    #[test]
+    fn has_contract_macro_with_sol_path() {
+        let source = r#"#[pvm_contract_macros::contract("MyToken.sol")]"#;
+        assert!(has_contract_macro(source));
+    }
+
+    #[test]
+    fn has_contract_macro_no_args() {
+        let source = r#"#[pvm_contract_macros::contract]"#;
+        assert!(has_contract_macro(source));
+    }
+
+    #[test]
+    fn has_contract_macro_dsl_binary() {
+        let source = r#"use pvm_contract_builder_dsl::{ContractBuilder, solidity_selector};"#;
+        assert!(!has_contract_macro(source));
     }
 
     // --- parse_sol_params ---

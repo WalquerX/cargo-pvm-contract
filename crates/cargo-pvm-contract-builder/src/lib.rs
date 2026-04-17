@@ -476,7 +476,7 @@ fn generate_abi_file(
             eprintln!("No pvm_contract found, skipping ABI generation");
         }
         Err(e) => {
-            eprintln!("Warning: Failed to generate ABI: {e}");
+            return Err(e).context("Failed to generate ABI");
         }
     }
     Ok(())
