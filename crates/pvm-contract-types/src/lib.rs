@@ -26,7 +26,7 @@ pub use i256::{I256, ParseI256Error};
 
 #[doc(hidden)]
 pub use const_format;
-use ruint::aliases::U256;
+pub use ruint::aliases::U256;
 
 /// Fixed-size buffer for compile-time string concatenation.
 ///
@@ -387,11 +387,12 @@ pub trait SolRevert {
     ///
     /// For single `SolError` types, returns the one signature.
     /// For error enums (`sol_revert_enum!`), returns all inner error signatures.
-    fn error_signatures() -> &'static [&'static str]
+    fn error_signatures() -> impl Iterator<Item = &'static &'static str>
     where
         Self: Sized,
     {
-        &[]
+        let arr: &'static [&'static str] = &[];
+        arr.iter()
     }
 }
 
@@ -409,8 +410,9 @@ impl<E: SolError> SolRevert for E {
         self.encoded_size()
     }
 
-    fn error_signatures() -> &'static [&'static str] {
-        &[E::SIGNATURE]
+    fn error_signatures() -> impl Iterator<Item = &'static &'static str> {
+        let arr = &[E::SIGNATURE];
+        arr.iter()
     }
 }
 
@@ -530,8 +532,9 @@ impl SolRevert for SolDefaultError {
         }
     }
 
-    fn error_signatures() -> &'static [&'static str] {
-        &[Panic::SIGNATURE, RevertString::SIGNATURE]
+    fn error_signatures() -> impl Iterator<Item = &'static &'static str> {
+        let arr = &[Panic::SIGNATURE, RevertString::SIGNATURE];
+        arr.iter()
     }
 }
 
@@ -628,12 +631,14 @@ macro_rules! sol_revert_enum {
                 }
             }
 
-            fn error_signatures() -> &'static [&'static str] {
-                &[
-                    $(<$inner as $crate::SolError>::SIGNATURE,)+
+            fn error_signatures() -> impl Iterator<Item = &'static &'static str> {
+               let arr =  &[
                     <$crate::Panic as $crate::SolError>::SIGNATURE,
                     <$crate::RevertString<'static> as $crate::SolError>::SIGNATURE,
-                ]
+                ];
+                let arr = arr.into_iter();
+                let arr = arr$(.chain(<$inner as $crate::SolRevert>::error_signatures()))+;
+                arr.into_iter()
             }
         }
 
@@ -891,6 +896,21 @@ impl SolEncode for &str {
         buf[32..32 + data_len].copy_from_slice(bytes);
         buf[32 + data_len..32 + data_len + padding].fill(0);
     }
+}
+
+impl SolEncode for () {
+    const IS_DYNAMIC: bool = false;
+    const SOL_NAME: &'static str = "unit";
+
+    fn encode_body_len(&self) -> usize {
+        0
+    }
+
+    fn encode_body_to(&self, _buf: &mut [u8]) {}
+}
+
+impl SolDecode for () {
+    fn decode_at(_input: &[u8], _offset: usize) -> Self {}
 }
 
 // ---------------------------------------------------------------------------
