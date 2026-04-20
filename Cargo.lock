@@ -1237,7 +1237,6 @@ dependencies = [
  "anyhow",
  "polkavm-linker",
  "pvm-contract-types",
- "serde",
  "serde_json",
  "tempfile",
  "toml_edit 0.22.27",
@@ -4408,6 +4407,8 @@ dependencies = [
  "proptest",
  "pvm-contract-macros",
  "ruint",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

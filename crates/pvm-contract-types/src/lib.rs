@@ -11,6 +11,15 @@ mod alloc_types;
 #[cfg(feature = "alloc")]
 pub use alloc_types::Bytes;
 
+#[cfg(feature = "abi-gen")]
+mod abi_gen;
+#[cfg(feature = "abi-gen")]
+pub use abi_gen::{AbiItem, AbiJson, AbiParam, abi_to_json, parse_type_str};
+
+#[cfg(feature = "abi-gen")]
+#[doc(hidden)]
+pub use serde_json;
+
 mod host;
 pub use host::{
     CallFlags, HostApi, HostResult, PolkaVmHost, ReturnErrorCode, ReturnFlags, StorageFlags,
@@ -239,6 +248,18 @@ pub trait SolEncode {
     } else {
         Self::HEAD_SIZE
     };
+
+    /// Build an ABI parameter description for this type.
+    /// Only available when the `abi-gen` feature is enabled.
+    /// Structs override this to return `"type": "tuple"` with `components`.
+    #[cfg(feature = "abi-gen")]
+    fn abi_param(name: &str) -> AbiParam {
+        AbiParam {
+            name: name.into(),
+            param_type: Self::SOL_NAME.into(),
+            components: alloc::vec![],
+        }
+    }
 
     /// Whether this type is a Rust tuple `(T1, T2, ...)`.
     /// Tuples represent multiple return values and skip the `enc((T))` wrapping
@@ -1000,6 +1021,17 @@ impl<T: SolArrayElement, const N: usize> SolEncode for [T; N] {
             }
         }
     }
+
+    /// For `[T; N]`, ABI type is `T_abi_type[N]` and components come from T.
+    #[cfg(feature = "abi-gen")]
+    fn abi_param(name: &str) -> AbiParam {
+        let inner = T::abi_param("");
+        AbiParam {
+            name: alloc::string::String::from(name),
+            param_type: alloc::format!("{}[{}]", inner.param_type, N),
+            components: inner.components,
+        }
+    }
 }
 
 impl<T: SolArrayElement + StaticEncodedLen, const N: usize> StaticEncodedLen for [T; N] {
@@ -1067,6 +1099,23 @@ macro_rules! impl_tuple_sol {
                     }
                     __ho += $T::SLOT_SIZE;
                 )+
+            }
+
+            #[cfg(feature = "abi-gen")]
+            fn abi_param(name: &str) -> AbiParam {
+                let mut __idx = 0u32;
+                AbiParam {
+                    name: alloc::string::String::from(name),
+                    param_type: alloc::string::String::from("tuple"),
+                    components: alloc::vec![
+                        $({
+                            let _ = __idx;
+                            let p = $T::abi_param("");
+                            __idx += 1;
+                            p
+                        }),+
+                    ],
+                }
             }
         }
 

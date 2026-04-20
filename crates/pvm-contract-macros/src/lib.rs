@@ -214,7 +214,7 @@ use syn::{DeriveInput, ItemFn, ItemMod, parse_macro_input};
 ///                 let result = balance_of(::core::convert::Into::into(account));
 ///                 let mut __buf = [0u8;
 ///                     <U256 as ::pvm_contract_types::StaticEncodedLen>::ENCODED_SIZE];
-///                 <U256 as ::pvm_contract_types::SolEncode>::encode_body_to(&result, &mut __buf);
+///                 <U256 as ::pvm_contract_types::SolEncode>::encode_to(&result, &mut __buf);
 ///                 ::pvm_contract_types::PolkaVmHost::return_value(
 ///                     ::pvm_contract_types::ReturnFlags::empty(), &__buf);
 ///             }
