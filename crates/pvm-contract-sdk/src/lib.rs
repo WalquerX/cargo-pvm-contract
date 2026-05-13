@@ -68,6 +68,7 @@ pub use pvm_contract_types::{
     CallFlags,
     // Encoding / decoding
     ConstStr,
+    DecodeError,
     // Error traits and types
     EmptyError,
     Host,
@@ -88,6 +89,7 @@ pub use pvm_contract_types::{
     SolEncode,
     SolError,
     SolRevert,
+    StaticDecode,
     StaticEncodedLen,
     StorageFlags,
     U256,
@@ -159,6 +161,7 @@ pub use pvm_contract_types::serde_json;
 pub mod prelude {
     pub use crate::{
         Address,
+        DecodeError,
         // Errors
         EmptyError,
         // Host
