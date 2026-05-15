@@ -28,8 +28,17 @@ pub use serde_json;
 
 mod host;
 pub use host::{
-    CallFlags, Host, HostApi, HostResult, PolkaVmHost, ReturnErrorCode, ReturnFlags, StorageFlags,
+    CallFlags, Context, ContractContext, Host, HostApi, HostResult, PolkaVmHost, ReturnErrorCode,
+    ReturnFlags, StorageFlags,
 };
+
+/// Sealing marker for traits that should only be implemented by code in this
+/// workspace (specifically: macro-generated contract structs and [`Context`]).
+/// External users have no reason to import this module.
+#[doc(hidden)]
+pub mod __private {
+    pub trait Sealed {}
+}
 
 /// Re-exported so macro-generated `call()` / `deploy()` wrappers can reach it
 /// without the user's `Cargo.toml` depending on `pallet-revive-uapi` directly.
@@ -250,7 +259,7 @@ pub fn value_transferred_is_nonzero<H: HostApi>(host: &H) -> bool {
 
 /// Selector-based dispatch trait for composable `#[contract]` routing.
 ///
-/// Each contract module gets a generated `impl Router<Host> for Contract`
+/// Each contract module gets a generated `impl Router for Contract`
 /// that delegates to a free `mod_name::route(this, selector, input)` function.
 /// Dispatch arms call `host.return_value(...)` directly — `-> !` on `riscv64`
 /// (terminates execution), `-> ()` on host targets (captures into
@@ -269,7 +278,7 @@ pub fn value_transferred_is_nonzero<H: HostApi>(host: &H) -> bool {
 ///     // fallback or revert
 /// }
 /// ```
-pub trait Router<H: HostApi> {
+pub trait Router {
     /// Dispatch `selector` against `input`. Returns `Some(())` if the selector
     /// was handled (the dispatch arm has already called `host.return_value(...)`,
     /// which on `riscv64` means execution has terminated). Returns `None` if

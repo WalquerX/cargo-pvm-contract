@@ -218,6 +218,7 @@ pub(super) fn boundary_size_check(has_params: bool, min_size_expr: &TokenStream)
 
 pub fn generate_dispatch_arm(
     method: &MethodInfo,
+    struct_name: &syn::Ident,
     use_alloc: bool,
     guard_hoisted: bool,
 ) -> (TokenStream, TokenStream) {
@@ -246,10 +247,19 @@ pub fn generate_dispatch_arm(
         }
     };
 
+    // Pure methods are associated functions — no `self` receiver — so dispatch
+    // them via UFCS (`Self::fn_name`) rather than method-call syntax
+    // (`this.fn_name`), which would only work for `&self` / `&mut self`.
+    let invoke = if method.mutability == StateMutability::Pure {
+        quote! { #struct_name::#fn_name }
+    } else {
+        quote! { this.#fn_name }
+    };
+
     let body = if method.returns_result {
         if has_return {
             quote! {
-                match this.#fn_name(#(#call_args),*) {
+                match #invoke(#(#call_args),*) {
                     Ok(result) => { #encode_and_return }
                     Err(e) => {
                         #revert_err
@@ -258,7 +268,7 @@ pub fn generate_dispatch_arm(
             }
         } else {
             quote! {
-                match this.#fn_name(#(#call_args),*) {
+                match #invoke(#(#call_args),*) {
                     Ok(()) => {
                         <::pvm_contract_sdk::Host as ::pvm_contract_sdk::HostApi>::return_value(
                             this.host(),
@@ -276,12 +286,12 @@ pub fn generate_dispatch_arm(
         }
     } else if has_return {
         quote! {
-            let result = this.#fn_name(#(#call_args),*);
+            let result = #invoke(#(#call_args),*);
             #encode_and_return
         }
     } else {
         quote! {
-            this.#fn_name(#(#call_args),*);
+            #invoke(#(#call_args),*);
             <::pvm_contract_sdk::Host as ::pvm_contract_sdk::HostApi>::return_value(
                 this.host(),
                 ::pvm_contract_sdk::ReturnFlags::empty(),
@@ -310,7 +320,7 @@ pub struct RouteItems {
     pub route_fn: TokenStream,
 }
 
-/// `impl Router<Host> for mod_name::StructName` block, placed outside the module.
+/// `impl Router for mod_name::StructName` block, placed outside the module.
 pub struct RouterImpl {
     pub tokens: TokenStream,
 }
@@ -345,7 +355,7 @@ pub fn generate_router(
 
     let (selector_consts, dispatch_arms): (Vec<_>, Vec<_>) = methods
         .iter()
-        .map(|m| generate_dispatch_arm(m, use_alloc, all_non_payable))
+        .map(|m| generate_dispatch_arm(m, struct_name, use_alloc, all_non_payable))
         .unzip();
 
     let prelude = if all_non_payable {
@@ -381,9 +391,7 @@ pub fn generate_router(
 
     let router_impl = RouterImpl {
         tokens: quote! {
-            impl ::pvm_contract_sdk::Router<::pvm_contract_sdk::Host>
-                for #mod_name::#struct_name
-            {
+            impl ::pvm_contract_sdk::Router for #mod_name::#struct_name {
                 fn route(
                     &mut self,
                     selector: [u8; 4],
@@ -541,7 +549,8 @@ mod tests {
     #[test]
     fn non_payable_arm_emits_value_zero_assert() {
         let m = sample_method("transfer", StateMutability::NonPayable);
-        let (_, arm) = generate_dispatch_arm(&m, false, false);
+        let struct_name: syn::Ident = syn::parse_quote!(Contract);
+        let (_, arm) = generate_dispatch_arm(&m, &struct_name, false, false);
         let expected = expect_test::expect![[r#"
             fn __w(selector: [u8; 4], input: &[u8], this: &mut Contract) {
                 match selector {
@@ -585,7 +594,8 @@ mod tests {
     #[test]
     fn payable_arm_omits_value_zero_assert() {
         let m = sample_method("deposit", StateMutability::Payable);
-        let (_, arm) = generate_dispatch_arm(&m, false, false);
+        let struct_name: syn::Ident = syn::parse_quote!(Contract);
+        let (_, arm) = generate_dispatch_arm(&m, &struct_name, false, false);
         let expected = expect_test::expect![[r#"
             fn __w(selector: [u8; 4], input: &[u8], this: &mut Contract) {
                 match selector {
@@ -628,7 +638,8 @@ mod tests {
     #[test]
     fn hoisted_non_payable_arm_omits_value_zero_assert() {
         let m = sample_method("transfer", StateMutability::NonPayable);
-        let (_, arm) = generate_dispatch_arm(&m, false, true);
+        let struct_name: syn::Ident = syn::parse_quote!(Contract);
+        let (_, arm) = generate_dispatch_arm(&m, &struct_name, false, true);
         let expected = expect_test::expect![[r#"
             fn __w(selector: [u8; 4], input: &[u8], this: &mut Contract) {
                 match selector {

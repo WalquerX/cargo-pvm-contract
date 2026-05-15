@@ -73,11 +73,14 @@ The macro injects a `pub host: Host` field on the storage struct and a `fn host(
 
 **DSL API** (explicit, manual dispatch):
 ```rust
+let host = Host::new();
 ContractBuilder::new()
     .method(BALANCE_OF_SELECTOR, balance_of_handler)
     .method(TRANSFER_SELECTOR, transfer_handler)
-    .dispatch::<HostFnImpl, 256>()
+    .dispatch_impl::<256>(&host)
 ```
+
+DSL handlers take a concrete `&Host` (same type the macro path injects on the storage struct). For typed cross-contract calls, handlers wrap a cloned host in `Context::new(host.clone())` — `Context` impls `ContractContext` so it can be passed to `.call(&mut cx)` / `.delegate_call(&mut cx)`. `Host::clone()` is `Copy` on riscv64 (ZST) and a single `Rc::clone` on host targets. Because the wrapper carries only the host handle (no storage state), the borrow checker cannot enforce view-vs-mutating in DSL; use the `#[contract]` macro path if you need that static guarantee. The same `Context` type is used in unit tests, where it owns a `Host` backed by a `MockHost`.
 
 ### Macro-Generated Code
 
@@ -104,6 +107,48 @@ Selectors are Keccak-256 of the canonical Solidity signature (first 4 bytes), co
 
 - `#[method]` — marks a public function as a contract method
 - `#[method(rename = "name")]` — overrides the Solidity function name (default: snake_case to camelCase)
+- `#[payable]` — marks the method as `payable` (must be combined with `&mut self`)
+
+### Mutability Inference
+
+Solidity `stateMutability` is inferred from the Rust receiver. No explicit `#[view]` or `#[pure]` attribute — receiver shape is the source of truth.
+
+| Receiver | `#[payable]` | ABI emits |
+|---|---|---|
+| none (`fn foo(args)`) | — | `pure` |
+| `&self` | — | `view` |
+| `&mut self` | — | `nonpayable` |
+| `&mut self` | yes | `payable` |
+| `&self` | yes | **compile error** |
+| no receiver | yes | **compile error** |
+
+**Constructor:** must take `&mut self`; `pure`/`view` constructors are rejected (they cannot initialize storage). `#[payable]` is allowed.
+
+**Fallback:** follows the same inference table as regular methods.
+
+**`.sol` consistency check:** when a `.sol` interface is provided, the macro errors if the Rust-inferred mutability disagrees with the `.sol` declaration (e.g., `.sol` says `view` but Rust uses `&mut self`).
+
+### Mutability Enforcement
+
+Three layers, in increasing strength:
+
+1. **Compile-time (typed-API)** — `#[contract]` auto-implements `ContractContext` on the storage struct (and forbids `#[derive(Clone)]` on it). Cross-contract call builders take `&impl ContractContext` for `view`/`pure` callees and `&mut impl ContractContext` for `nonpayable`/`payable` callees, so a `&self` (view) method *cannot* initiate a state-mutating call through the typed `abi_import!`-generated SDK. `delegate_call` and `instantiate` always require `&mut`. Storage helpers (`Lazy`, `Mapping`) similarly gate `set`/`insert` on `&mut self`.
+
+2. **Runtime (contract-side)** — non-payable methods (`pure`/`view`/`nonpayable`) get an injected `__pvm_assert_non_payable` / `__pvm_assert_value_zero` guard at the dispatch entry; the contract reverts if `msg.value > 0`.
+
+3. **Runtime (host-side)** — `pallet-revive` enforces the STATICCALL boundary: state-mutating host calls revert when invoked inside a static frame. This is what backstops `view`/`pure` for cross-contract callers.
+
+**Honest caveat:** the typed-API gate covers cross-contract calls made through `abi_import!`-generated wrappers and storage operations through `pvm-storage`. Raw `pallet_revive_uapi` calls (e.g., `api::set_storage`) bypass the type-level check — only the host's STATICCALL enforcement and the runtime payable guard apply there. Use the typed APIs as the primary surface; reach for raw uAPI only when the typed surface lacks coverage.
+
+**Pure semantics (matches Solidity, by design):** a pure method has no receiver and therefore no `host` accessor. By construction it cannot:
+- make cross-contract calls (no `&impl ContractContext` to pass to `CallBuilder::call`),
+- read block/chain/tx context (`block.number`, `chain.id`, etc.),
+- call host-routed helpers (`keccak256`, event emission, storage),
+- emit events.
+
+This matches Solidity's `pure` rules — solc rejects the same operations in a `pure` function. If a method needs `keccak256`, block context, or any host call, mark it `view` (`&self`) rather than pure. The restriction isn't a SDK limitation; it's the same semantic boundary Solidity callers expect when they see `pure` in the ABI.
+
+**Reentrancy non-protection:** `&mut self` enforces single-threaded mutation within a frame, but persistent storage is shared across reentrant frames (each callee gets a fresh contract struct, so the borrow checker offers no cross-frame guarantee). A reentrancy-sensitive method needs an explicit guard (not provided by the SDK yet).
 
 ## Type System
 

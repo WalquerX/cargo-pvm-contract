@@ -1,8 +1,6 @@
 #![doc = include_str!("../../../specs/builder-dsl.md")]
 #![no_std]
 
-use core::marker::PhantomData;
-
 pub use pallet_revive_uapi;
 pub use pallet_revive_uapi::solidity_selector;
 pub use polkavm_derive;
@@ -10,10 +8,26 @@ pub use polkavm_derive::polkavm_export;
 pub use pvm_contract_types;
 pub use ruint;
 
-use pvm_contract_types::ReturnFlags;
+use pvm_contract_types::{Host, HostApi, ReturnFlags};
 
 /// 4-byte Solidity function selector.
 pub type Selector = [u8; 4];
+
+/// Revert the `deploy` entry point if any value was attached.
+///
+/// Solidity's default constructor is non-payable, and the `#[contract]` macro
+/// path auto-injects an equivalent guard. The DSL has no codegen step, so
+/// scaffolded `deploy()` functions must call this explicitly. Omit the call
+/// only when the constructor is intentionally payable.
+#[inline(always)]
+pub fn assert_non_payable_deploy(host: &Host) {
+    if pvm_contract_types::value_transferred_is_nonzero(host) {
+        host.return_value(
+            ReturnFlags::REVERT,
+            &pvm_contract_types::framework_errors::NON_PAYABLE_VALUE_RECEIVED,
+        );
+    }
+}
 
 /// The result a [`MethodHandler`] returns to the dispatcher.
 ///
@@ -44,25 +58,22 @@ pub enum HandlerResult {
 /// - The returned `HandlerResult::Ok(n)` / `Revert(n)` must satisfy
 ///   `n <= output.len()`; the dispatcher clamps but will not re-read the
 ///   buffer past `n` bytes.
-pub type MethodHandler<H> = fn(host: &H, input: &[u8], output: &mut [u8]) -> HandlerResult;
+pub type MethodHandler = fn(host: &Host, input: &[u8], output: &mut [u8]) -> HandlerResult;
 
 /// Maximum number of methods a single contract can register.
 const MAX_METHODS: usize = 16;
 
-fn noop_handler<H: pvm_contract_types::HostApi>(
-    _host: &H,
-    _input: &[u8],
-    _output: &mut [u8],
-) -> HandlerResult {
+#[inline(always)]
+fn noop_handler(_host: &Host, _input: &[u8], _output: &mut [u8]) -> HandlerResult {
     HandlerResult::Ok(0)
 }
 
 /// Pure Rust builder for PVM smart contract dispatch.
 ///
-/// Generic over the host type so only one monomorphization lands in any given
-/// binary. In production that's `PolkaVmHost` (a zero-sized type — the builder plus
-/// dispatch loop is byte-equivalent to today's static-call version). In unit
-/// tests it's `MockHost`, compiled into the host-target test binary only.
+/// Handlers take a concrete `&Host`; on riscv64 `Host` is a zero-sized wrapper
+/// around `PolkaVmHost`, so production builds pay no indirection. In native
+/// unit tests `Host` wraps `Rc<dyn HostApi>` (via [`Host::from_dyn`]) so a
+/// `MockHost` can back the same handlers.
 ///
 /// Methods registered via [`method`](Self::method) are non-payable: the
 /// dispatcher reverts with
@@ -74,53 +85,56 @@ fn noop_handler<H: pvm_contract_types::HostApi>(
 ///
 /// ```ignore
 /// use pvm_contract_builder_dsl::{ContractBuilder, HandlerResult, solidity_selector};
-/// use pvm_contract_types::{HostApi, PolkaVmHost};
+/// use pvm_contract_types::Host;
 ///
 /// const FIB: [u8; 4] = solidity_selector("fibonacci(uint32)");
 ///
-/// fn fibonacci<H: HostApi>(_host: &H, input: &[u8], output: &mut [u8]) -> HandlerResult {
+/// fn fibonacci(_host: &Host, _input: &[u8], _output: &mut [u8]) -> HandlerResult {
 ///     // decode n, compute fib(n), encode into output[..32]
 ///     HandlerResult::Ok(32)
 /// }
 ///
 /// #[cfg(target_arch = "riscv64")]
 /// pub extern "C" fn call() {
-///     let host = PolkaVmHost;
-///     ContractBuilder::<PolkaVmHost>::new()
-///         .method(FIB, fibonacci::<PolkaVmHost>)
+///     let host = Host::new();
+///     ContractBuilder::new()
+///         .method(FIB, fibonacci)
 ///         .dispatch_impl::<256>(&host);
 /// }
 /// ```
-pub struct ContractBuilder<H: pvm_contract_types::HostApi> {
-    methods: [(Selector, MethodHandler<H>); MAX_METHODS],
+pub struct ContractBuilder {
+    methods: [(Selector, MethodHandler); MAX_METHODS],
     len: usize,
     payable_bits: u64,
-    _marker: PhantomData<fn(&H)>,
 }
 
-impl<H: pvm_contract_types::HostApi> Default for ContractBuilder<H> {
+impl Default for ContractBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<H: pvm_contract_types::HostApi> ContractBuilder<H> {
+impl ContractBuilder {
     /// Create a new empty contract builder.
+    #[inline(always)]
     pub fn new() -> Self {
         Self {
-            methods: [([0; 4], noop_handler::<H> as MethodHandler<H>); MAX_METHODS],
+            methods: [([0; 4], noop_handler as MethodHandler); MAX_METHODS],
             len: 0,
             payable_bits: 0,
-            _marker: PhantomData,
         }
     }
 
     /// Register a non-payable method handler for the given selector.
     ///
+    /// Rejects calls carrying a non-zero value transfer at the dispatch
+    /// boundary; the handler itself is not called in that case.
+    ///
     /// # Panics
     ///
     /// Panics if more than MAX_METHODS methods are registered.
-    pub fn method(mut self, selector: Selector, handler: MethodHandler<H>) -> Self {
+    #[inline]
+    pub fn method(mut self, selector: Selector, handler: MethodHandler) -> Self {
         assert!(
             self.len < MAX_METHODS,
             "ContractBuilder: exceeded MAX_METHODS ({})",
@@ -139,7 +153,8 @@ impl<H: pvm_contract_types::HostApi> ContractBuilder<H> {
     /// # Panics
     ///
     /// Panics if more than MAX_METHODS methods are registered.
-    pub fn payable_method(mut self, selector: Selector, handler: MethodHandler<H>) -> Self {
+    #[inline]
+    pub fn payable_method(mut self, selector: Selector, handler: MethodHandler) -> Self {
         assert!(
             self.len < MAX_METHODS,
             "ContractBuilder: exceeded MAX_METHODS ({})",
@@ -161,7 +176,7 @@ impl<H: pvm_contract_types::HostApi> ContractBuilder<H> {
     #[inline(always)]
     pub fn try_route(
         &self,
-        host: &H,
+        host: &Host,
         selector: Selector,
         input: &[u8],
         output: &mut [u8],
@@ -195,10 +210,16 @@ impl<H: pvm_contract_types::HostApi> ContractBuilder<H> {
     /// Mirrors the `#[contract]` macro's `route()` shape: same dispatch
     /// architecture across DSL and macro paths, same test ergonomics.
     ///
-    /// `#[inline]` keeps the dispatcher tight when called from a single
-    /// `extern "C" fn call()` entry point.
-    #[inline]
-    pub fn dispatch_impl<const BUF_SIZE: usize>(&self, host: &H) {
+    /// `#[inline(always)]` keeps the dispatcher tight when called from a
+    /// single `extern "C" fn call()` entry point. Force-inline (not just hint)
+    /// is required to preserve the cross-crate constant-folding that the
+    /// previous `<H: HostApi>` generic gave us "for free" via monomorphization
+    /// — generics are always inlined-visible at the call site, but a plain
+    /// `#[inline]` non-generic function is only a hint the inliner may
+    /// decline, which produces an indirect-call dispatch and several hundred
+    /// extra bytes of bytecode.
+    #[inline(always)]
+    pub fn dispatch_impl<const BUF_SIZE: usize>(&self, host: &Host) {
         let call_data_len = host.call_data_size() as usize;
 
         if call_data_len > BUF_SIZE {
@@ -245,63 +266,56 @@ impl<H: pvm_contract_types::HostApi> ContractBuilder<H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pvm_contract_types::MockHost;
+    use pvm_contract_types::Host;
 
     const DEPOSIT: Selector = [0xde, 0x00, 0x00, 0x01];
     const TRANSFER: Selector = [0x7f, 0x00, 0x00, 0x02];
 
-    fn dummy_handler<H: pvm_contract_types::HostApi>(
-        _host: &H,
-        _input: &[u8],
-        _output: &mut [u8],
-    ) -> HandlerResult {
+    fn dummy_handler(_host: &Host, _input: &[u8], _output: &mut [u8]) -> HandlerResult {
         HandlerResult::Ok(0)
     }
 
     #[test]
     #[should_panic(expected = "MAX_METHODS")]
     fn method_panics_on_overflow() {
-        let mut builder = ContractBuilder::<MockHost>::new();
+        let mut builder = ContractBuilder::new();
         for i in 0..=MAX_METHODS {
-            builder = builder.method([i as u8, 0, 0, 0], dummy_handler::<MockHost>);
+            builder = builder.method([i as u8, 0, 0, 0], dummy_handler);
         }
     }
 
     #[test]
     #[should_panic(expected = "MAX_METHODS")]
     fn payable_method_panics_on_overflow() {
-        let mut builder = ContractBuilder::<MockHost>::new();
+        let mut builder = ContractBuilder::new();
         for i in 0..=MAX_METHODS {
-            builder = builder.payable_method([i as u8, 0, 0, 0], dummy_handler::<MockHost>);
+            builder = builder.payable_method([i as u8, 0, 0, 0], dummy_handler);
         }
     }
 
     #[test]
     fn payable_bit_set_correctly() {
-        let builder = ContractBuilder::<MockHost>::new()
-            .method(TRANSFER, dummy_handler::<MockHost>)
-            .payable_method(DEPOSIT, dummy_handler::<MockHost>);
+        let builder = ContractBuilder::new()
+            .method(TRANSFER, dummy_handler)
+            .payable_method(DEPOSIT, dummy_handler);
         assert_eq!(builder.payable_bits, 0b10);
     }
 
     #[test]
     fn payable_bit_survives_for_high_index() {
-        let mut builder = ContractBuilder::<MockHost>::new();
+        let mut builder = ContractBuilder::new();
         for i in 0..(MAX_METHODS - 1) {
-            builder = builder.method([i as u8, 0, 0, 0xaa], dummy_handler::<MockHost>);
+            builder = builder.method([i as u8, 0, 0, 0xaa], dummy_handler);
         }
-        builder = builder.payable_method(
-            [(MAX_METHODS - 1) as u8, 0, 0, 0xaa],
-            dummy_handler::<MockHost>,
-        );
+        builder = builder.payable_method([(MAX_METHODS - 1) as u8, 0, 0, 0xaa], dummy_handler);
         assert_eq!(builder.payable_bits, 1u64 << (MAX_METHODS - 1));
     }
 
     #[test]
     fn non_payable_contract_has_zero_payable_bits() {
-        let builder = ContractBuilder::<MockHost>::new()
-            .method(TRANSFER, dummy_handler::<MockHost>)
-            .method(DEPOSIT, dummy_handler::<MockHost>);
+        let builder = ContractBuilder::new()
+            .method(TRANSFER, dummy_handler)
+            .method(DEPOSIT, dummy_handler);
         assert_eq!(builder.payable_bits, 0);
     }
 }

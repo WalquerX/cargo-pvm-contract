@@ -2,10 +2,12 @@
 #![no_main]
 #![no_std]
 
-use pvm_contract_builder_dsl::pvm_contract_types::{
-    HostApi, PolkaVmHost, SolDecode, SolEncode, StaticDecode, StaticEncodedLen,
+use pvm_contract_builder_dsl::{
+    ContractBuilder, HandlerResult, assert_non_payable_deploy, solidity_selector,
 };
-use pvm_contract_builder_dsl::{ContractBuilder, HandlerResult, solidity_selector};
+use pvm_contract_builder_dsl::pvm_contract_types::{
+    Host, SolEncode, StaticDecode, StaticEncodedLen,
+};
 
 const FIBONACCI_SELECTOR: [u8; 4] = solidity_selector("fibonacci(uint32)");
 
@@ -19,18 +21,20 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
-pub extern "C" fn deploy() {}
+pub extern "C" fn deploy() {
+    assert_non_payable_deploy(&Host::new());
+}
 
 #[unsafe(no_mangle)]
 #[polkavm_derive::polkavm_export]
 pub extern "C" fn call() {
-    let host = PolkaVmHost;
-    ContractBuilder::<PolkaVmHost>::new()
-        .method(FIBONACCI_SELECTOR, fibonacci_handler::<PolkaVmHost>)
+    let host = Host::new();
+    ContractBuilder::new()
+        .method(FIBONACCI_SELECTOR, fibonacci_handler)
         .dispatch_impl::<256>(&host);
 }
 
-fn fibonacci_handler<H: HostApi>(_host: &H, input: &[u8], output: &mut [u8]) -> HandlerResult {
+fn fibonacci_handler(_host: &Host, input: &[u8], output: &mut [u8]) -> HandlerResult {
     let n = unsafe { u32::decode_unchecked(input, 0) };
     let result = fibonacci(n);
     let len = <u32 as StaticEncodedLen>::ENCODED_SIZE;

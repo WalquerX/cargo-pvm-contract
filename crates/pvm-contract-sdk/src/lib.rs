@@ -68,6 +68,9 @@ pub use pvm_contract_types::{
     CallFlags,
     // Encoding / decoding
     ConstStr,
+    Context,
+    // Mutation gating
+    ContractContext,
     DecodeError,
     // Error traits and types
     EmptyError,
@@ -99,6 +102,11 @@ pub use pvm_contract_types::{
     sol_revert_enum,
     value_transferred_is_nonzero,
 };
+
+/// Sealing module re-exported for the `#[contract]` macro to implement on
+/// generated storage structs. External users have no reason to import this.
+#[doc(hidden)]
+pub use pvm_contract_types::__private;
 
 // Cross-contract calls
 pub use pvm_contract_core::call::{
