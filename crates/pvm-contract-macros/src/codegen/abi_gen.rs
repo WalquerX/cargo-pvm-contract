@@ -185,6 +185,17 @@ fn generate_abi_gen_impl(
         quote! {}
     };
 
+    // Event ABI entries from #[derive(SolEvent)] types in the module.
+    let event_entries: Vec<TokenStream> = parsed
+        .event_idents
+        .iter()
+        .map(|ident| {
+            quote! {
+                __items.push(#ident::abi_item());
+            }
+        })
+        .collect();
+
     // Framework errors are parameterless (`Name()`). Only suppress when a
     // user-defined error has the exact same signature. A user-defined
     // `error InvalidCalldata(uint256)` has a different selector and must
@@ -221,6 +232,8 @@ fn generate_abi_gen_impl(
             #receive_entry
 
             #(#error_entries)*
+
+            #(#event_entries)*
 
             #(#framework_error_entries)*
 
@@ -324,6 +337,7 @@ mod tests {
             receive_name: None,
             receive_returns_result: false,
             error_types: vec![],
+            event_idents: vec![],
         };
 
         let (helper, main_fn) = generate_abi_gen(&parsed, true, &[]);
@@ -433,6 +447,7 @@ mod tests {
             receive_name: None,
             receive_returns_result: false,
             error_types: vec![],
+            event_idents: vec![],
         }
     }
 
@@ -525,6 +540,7 @@ mod tests {
             receive_name: None,
             receive_returns_result: false,
             error_types: vec![],
+            event_idents: vec![],
         };
 
         let slot_fields = vec![SlotField {
@@ -574,6 +590,7 @@ mod tests {
             receive_name: None,
             receive_returns_result: false,
             error_types: vec![],
+            event_idents: vec![],
         };
 
         let (helper, main_fn) = generate_abi_gen(&parsed, false, &[]);
@@ -616,6 +633,7 @@ mod tests {
             receive_name: None,
             receive_returns_result: false,
             error_types: vec![],
+            event_idents: vec![],
         };
 
         let slot_fields = vec![SlotField {
