@@ -132,13 +132,15 @@ Solidity `stateMutability` is inferred from the Rust receiver. No explicit `#[vi
 
 Three layers, in increasing strength:
 
-1. **Compile-time (typed-API)** — `#[contract]` auto-implements `ContractContext` on the storage struct (and forbids `#[derive(Clone)]` on it). Cross-contract call builders take `&impl ContractContext` for `view`/`pure` callees and `&mut impl ContractContext` for `nonpayable`/`payable` callees, so a `&self` (view) method *cannot* initiate a state-mutating call through the typed `abi_import!`-generated SDK. `delegate_call` and `instantiate` always require `&mut`. Storage helpers (`Lazy`, `Mapping`) similarly gate `set`/`insert` on `&mut self`.
+1. **Compile-time (typed-API)** — `#[contract]` auto-implements `ContractContext` on the storage struct (and forbids `#[derive(Clone)]` on it). Cross-contract call builders take `&impl ContractContext` for `view`/`pure` callees and `&mut impl ContractContext` for `nonpayable`/`payable` callees, so a `&self` (view) method *cannot* initiate a state-mutating call through the typed `abi_import!`-generated SDK. `delegate_call` and `instantiate` always require `&mut`. Storage helpers (`Lazy`, `Mapping`) similarly gate `set`/`insert` on `&mut self` against the macro-injected fields. To prevent a view method from sidestepping that by reconstructing a fresh writable handle from `self.host().clone()` and a derived `StorageKey`, `Lazy::new` and `Mapping::new` are marked `unsafe fn` — the macro-driven `StorageComponent::new_at` path stays safe, but direct user construction must opt in to `unsafe` (and is therefore refused by `#![forbid(unsafe_code)]`).
 
 2. **Runtime (contract-side)** — non-payable methods (`pure`/`view`/`nonpayable`) get an injected `__pvm_assert_non_payable` / `__pvm_assert_value_zero` guard at the dispatch entry; the contract reverts if `msg.value > 0`.
 
 3. **Runtime (host-side)** — `pallet-revive` enforces the STATICCALL boundary: state-mutating host calls revert when invoked inside a static frame. This is what backstops `view`/`pure` for cross-contract callers.
 
-**Honest caveat:** the typed-API gate covers cross-contract calls made through `abi_import!`-generated wrappers and storage operations through `pvm-storage`. Raw `pallet_revive_uapi` calls (e.g., `api::set_storage`) bypass the type-level check — only the host's STATICCALL enforcement and the runtime payable guard apply there. Use the typed APIs as the primary surface; reach for raw uAPI only when the typed surface lacks coverage.
+**For belt-and-braces enforcement:** add `#![forbid(unsafe_code)]` at your contract crate root. That closes the `unsafe { Lazy::new(...) }` / `unsafe { Mapping::new(...) }` reconstruction bypass at compile time — the macro's own `unsafe` blocks live inside `pvm-storage`'s `StorageComponent::new_at` impls (a separate crate), so the gate doesn't break macro expansion.
+
+**Honest caveat:** the typed-API gate covers cross-contract calls made through `abi_import!`-generated wrappers and storage operations through `pvm-storage`. Raw `pallet_revive_uapi` calls (e.g., `api::set_storage`, `host.set_storage(...)`, `Host::new()`) bypass the type-level check — only the host's STATICCALL enforcement and the runtime payable guard apply there. Use the typed APIs as the primary surface; reach for raw uAPI (or the DSL) only when the typed surface lacks coverage. `forbid(unsafe_code)` does not gate raw uAPI because those calls are themselves safe.
 
 **Pure semantics (matches Solidity, by design):** a pure method has no receiver and therefore no `host` accessor. By construction it cannot:
 - make cross-contract calls (no `&impl ContractContext` to pass to `CallBuilder::call`),
@@ -275,15 +277,27 @@ The `pvm-storage` crate provides typed storage helpers with Solidity-compatible 
 | `Lazy<T>` | Single value at a fixed slot. `get(&self) -> T`, `set(&mut self, &T)`, `try_get(&self) -> Option<T>`, `clear(&mut self)` |
 | `Mapping<K, V>` | Key-value mapping. `get(&self, &K) -> V`, `insert(&mut self, &K, &V)`, `entry(&mut self, &K) -> Lazy<V>`, `remove(&mut self, &K)` |
 
-- Currently supports 32-byte types only (U256, Address, bool, `[u8; 32]`); variable-size values are future work
+- Supports static values up to `MAX_STATIC_SLOTS` * 32 bytes (single-word and multi-word static structs/tuples) and dynamic values (`String`, `Bytes`, `#[derive(SolType)]` structs with dynamic fields) using solc's inline/spilled `bytes`/`string` layout
+- `Vec<u8>` is rejected as a storage value — its ABI name is `"uint8[]"`, a different on-chain layout from Solidity `bytes`; use `Bytes` for `bytes`-shaped storage. `Vec<u8>` is still valid as an ABI parameter and as a mapping key
 - Solidity-compatible key derivation: `keccak256(pad32(key) ++ pad32(slot))`
 - `set(&mut self)` / `insert(&mut self)` / `entry(&mut self)` take `&mut self` for future view enforcement
 - `Mapping::entry()` returns a `Lazy<V>` handle for the derived slot, allowing read-then-write on the same key with a single keccak derivation instead of two
 - Nested mappings via chaining: `self.allowances.get(&owner).get(&spender)`
+- **Composability:** `#[storage]` structs auto-implement `StorageComponent` (slot reservation) and, under `--features abi-gen`, `StorageLayoutEmit` (so the outer contract flattens their leaves into the `storageLayout` JSON with dotted labels like `erc20.total_supply`). Hand-rolled storage components (e.g. a future `StorageVec<T>`) must implement both traits to participate in auto-numbered layouts and abi-gen output. `StorageComponent::PACKED_BYTES = 32` declares "always start a fresh slot" — mappings, multi-slot composites, and embedded `#[storage]` sub-structs all set this; sub-32-byte primitives propagate `T::PACKED_BYTES`
+- **Field-level packing:** adjacent sub-32-byte contract fields share a slot byte-for-byte with solc's layout — `Lazy<u128> a; Lazy<u128> b;` lands at `(slot=0, offset=16)` and `(slot=0, offset=0)`. The macro walker (`pvm_storage::layout_step`) is the const-fn computing each placement; the `storageLayout` JSON's `offset` field matches solc. Packed writes are read-modify-write (one SLOAD + one SSTORE), matching solc/Stylus gas profile
+- **`try_get` is full-slot only:** `Lazy::<T>::try_get` is rejected at compile time for sub-32-byte `T` (e.g. `Lazy<u128>`) with a const-assert message — a neighbour's write to the same slot would make `try_get` indistinguishable from `get`. For packed fields, use `.get()` and compare to the zero value of `T`
+- **Test-harness contract modules:** `#[contract(no_main)]` suppresses the abi-gen `fn main()` emission so a `#[contract]` can sit inside a `tests/` integration test or library crate without colliding with the test harness's own `main`. `__abi_json()` / `__storage_layout_json()` accessors are still emitted on the module
 
 ### Storage on the contract struct
 
-Declare `#[slot(N)]` fields directly on the contract struct. The `#[contract]` macro constructs each field with a `StorageKey` and a clone of the host handle. Methods access storage via `self`:
+Declare storage fields directly on the contract struct. Two modes:
+
+- **Auto-numbering (default).** Drop the `#[slot]` attribute and let the macro assign slots in declaration order via `layout_step`. Sub-word siblings pack into the same slot solc-style (`Lazy<u32>` at byte 28; adjacent `Lazy<bool>` at byte 27, sharing slot 0). Accepts every storage type.
+- **Explicit pinning (`#[slot(N)]`).** Restricted to full-slot types — `Mapping`, `Lazy<U256>`, `Lazy<String>`, `Lazy<Bytes>`, multi-slot composites like `Lazy<(U256, U256)>`, and `#[storage]` sub-structs (anything with `StorageComponent::PACKED_BYTES == 32`). Sub-word types are rejected at compile time (explicit mode would place them at byte 0 of the slot while solc places them right-aligned). Use auto-numbering for sub-word packing or wrap the field in a `#[storage]` sub-struct if you need to pin the group at a specific slot. The primary reason to reach for `#[slot(N)]` over auto-numbering is `#[cfg(...)]`-gated storage variants — auto-numbered fields can't carry `#[cfg]` because that would shift later slot indices based on the active feature set.
+
+Mixing the two modes is not supported (either all fields are explicit or all are auto-numbered).
+
+The `#[contract]` macro constructs each field with a `StorageKey` and a clone of the host handle. Methods access storage via `self`:
 
 ```rust
 #[contract("MyToken.sol")]

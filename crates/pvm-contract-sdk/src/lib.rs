@@ -44,7 +44,7 @@ extern crate self as pvm_contract_sdk;
 
 pub use pvm_contract_macros::{
     SolError, SolEvent, SolType, abi_import, constructor, contract, fallback, method, payable,
-    receive,
+    receive, storage,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,10 @@ pub use pvm_contract_types::{
     SolEvent,
     StaticDecode,
     StaticEncodedLen,
+    StorageDecode,
+    StorageEncode,
     StorageFlags,
+    StoragePackable,
     U256,
     const_keccak256,
     const_selector,
@@ -117,12 +120,19 @@ pub use pvm_contract_core::call::{
     StateMutability, View,
 };
 
-// Typed storage helpers. `Lazy`/`Mapping` are the declarable field types for
-// `#[slot(N)]` fields on the contract struct.
-pub use pvm_storage::{AsStorageKey, Lazy, Mapping, StorageKey};
+// Typed storage helpers. `Lazy<T>` / `Mapping<K, V>` cover both static
+// 32-byte values (`U256`, `Address`, `[u8; 32]`, …) and dynamic ones
+// (`String`, `Bytes`, structs with dynamic fields) through their
+// `StorageEncode`/`StorageDecode` impls. `Vec<u8>` is intentionally not a
+// storage value — use `Bytes` for `bytes`-shaped storage (`Vec<u8>` is ABI
+// `uint8[]`, a different on-chain layout). `StorageComponent` is the trait
+// typed storage helpers implement to participate in auto-numbered slot layout.
+pub use pvm_storage::{
+    AsStorageKey, LayoutStep, Lazy, Mapping, Ref, RefMut, StorageComponent, StorageKey, layout_step,
+};
 
 #[cfg(feature = "abi-gen")]
-pub use pvm_storage::StorageLayoutType;
+pub use pvm_storage::{StorageLayoutEmit, join_label};
 
 #[cfg(feature = "alloc")]
 pub use pvm_contract_types::Bytes;

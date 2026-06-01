@@ -502,6 +502,61 @@ pub fn contract(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+/// Derives [`StorageComponent`] for a struct so it can be embedded as a field
+/// inside another `#[storage]` struct or directly inside the `#[contract]`
+/// storage struct.
+///
+/// Field slots are auto-numbered in declaration order; the embedded struct's
+/// `SLOTS` is the sum of its fields' `SLOTS`. The contract struct's
+/// auto-numbering uses these `SLOTS` constants to assign contiguous ranges,
+/// so embedding nests cleanly without manual slot math.
+///
+/// # Example
+///
+/// ```ignore
+/// #[pvm_contract_sdk::storage]
+/// pub struct Erc20 {
+///     total_supply: Lazy<U256>,
+///     balances: Mapping<Address, U256>,
+///     allowances: Mapping<Address, Mapping<Address, U256>>,
+/// }
+///
+/// #[pvm_contract_sdk::contract]
+/// mod my_contract {
+///     pub struct MyContract {
+///         erc20: super::Erc20,           // claims 3 slots
+///         additional_state: Lazy<u32>,   // claims slot 3
+///     }
+/// }
+/// ```
+///
+/// # Constraints
+///
+/// - Only named-field structs are supported (unit/tuple structs rejected).
+/// - All fields must implement `StorageComponent` (which `Lazy`/`Mapping` and
+///   other `#[storage]` structs do).
+/// - `#[slot(N)]` pinning inside a `#[storage]` struct is *not* supported.
+///   Use auto-numbering, or write the leaf fields directly on the contract
+///   struct if you need explicit slots.
+/// - On the contract struct, `#[slot(N)]` accepts only full-slot types
+///   (`PACKED_BYTES == 32`): `Mapping`, `Lazy<U256>`, `Lazy<String>`,
+///   `Lazy<Bytes>`, multi-slot composites like `Lazy<(U256, U256)>`, and
+///   `#[storage]` sub-structs. Sub-word types (`Lazy<bool>`, `Lazy<u32>`,
+///   `Lazy<Address>`, etc.) are rejected at compile time — explicit-mode
+///   would place them at byte 0 of the slot while solc places them
+///   right-aligned, producing a non-solc layout. Sub-word packing is the
+///   auto-numbered walker's job (it packs siblings per solc via
+///   `layout_step`); wrap the field in a `#[storage]` sub-struct if you
+///   need to pin the group at a specific slot.
+#[proc_macro_attribute]
+pub fn storage(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as syn::ItemStruct);
+    match codegen::expand_storage_struct(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 /// Marks a function as a contract method. The signature is derived from the Solidity interface file.
 ///
 /// # Attributes

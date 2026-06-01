@@ -6,7 +6,7 @@ use crate::{DecodeError, SolDecode, SolEncode};
 /// `Vec<u8>` encodes as `uint8[]` (array of 32-byte-padded elements), while
 /// `Bytes` encodes as `bytes` (length-prefixed packed data), matching alloy's
 /// distinction between `Bytes` and `Vec<u8>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bytes(pub alloc::vec::Vec<u8>);
 
 impl SolEncode for Bytes {
@@ -69,6 +69,46 @@ impl From<alloc::vec::Vec<u8>> for Bytes {
 impl From<Bytes> for alloc::vec::Vec<u8> {
     fn from(b: Bytes) -> Self {
         b.0
+    }
+}
+
+/// `Bytes` uses solc's `bytes` storage layout: short (< 32 B) values fit
+/// inline at the field's slot; longer ones store the length in the slot and
+/// spill the body to `keccak256(slot) + i`. Same machinery as `String`.
+impl crate::StorageEncode for Bytes {
+    const STORAGE_SLOTS: usize = 1;
+    const PACKED_BYTES: usize = 32;
+    const HAS_DYNAMIC_BODY: bool = true;
+
+    // Dynamic-body type: live path goes through `write_to_storage` (header +
+    // body in one operation). `encode_slot` exists only to satisfy the
+    // trait's required-method contract that compile-checks static impls
+    // never forget a real slot codec.
+    fn encode_slot(&self, _slot_idx: usize, _buf: &mut [u8; 32]) {
+        unreachable!("Bytes::encode_slot: dispatch through write_to_storage")
+    }
+
+    fn write_to_storage(&self, host: &crate::Host, base_key: &[u8; 32]) {
+        crate::storage_codec::write_dynamic_bytes(host, base_key, &self.0);
+    }
+
+    fn clear_storage(host: &crate::Host, base_key: &[u8; 32], _slots: usize) {
+        crate::storage_codec::clear_dynamic_bytes(host, base_key);
+    }
+}
+
+impl crate::StorageDecode for Bytes {
+    // Dynamic-body type: see `encode_slot` above. Reads dispatch through
+    // `read_from_storage`.
+    fn from_slots(_slots: &[[u8; 32]]) -> Self {
+        unreachable!("Bytes::from_slots: dispatch through read_from_storage")
+    }
+
+    fn read_from_storage<const MAX_INLINE_SLOTS: usize>(
+        host: &crate::Host,
+        base_key: &[u8; 32],
+    ) -> Self {
+        Bytes(crate::storage_codec::read_dynamic_bytes(host, base_key))
     }
 }
 
