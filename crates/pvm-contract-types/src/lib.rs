@@ -1444,7 +1444,7 @@ impl<T: SolArrayElement + StaticDecode + StaticEncodedLen, const N: usize> Stati
                         as usize;
                     unsafe { T::decode_unchecked(input, offset + field_offset) }
                 } else {
-                    unsafe { T::decode_unchecked(input, i * T::SLOT_SIZE) }
+                    unsafe { T::decode_unchecked(input, offset + i * T::SLOT_SIZE) }
                 }
             };
 
