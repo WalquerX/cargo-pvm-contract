@@ -149,7 +149,7 @@ fn sol_storage_type_name(ty: &syn::Type) -> TokenStream {
                 let v_expr = sol_storage_type_name(v);
                 return quote! {
                     ::std::format!(
-                        "mapping({},{})",
+                        "mapping({} => {})",
                         <#k as ::pvm_contract_sdk::SolEncode>::SOL_NAME,
                         #v_expr,
                     )
