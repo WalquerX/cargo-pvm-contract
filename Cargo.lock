@@ -1237,10 +1237,13 @@ name = "cargo-pvm-contract-builder"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "expect-test",
  "polkavm-linker",
+ "proc-macro2",
  "pvm-contract-types",
  "serde_json",
  "syn 2.0.117",
+ "syn-solidity",
  "tempfile",
  "toml_edit 0.22.27",
 ]
