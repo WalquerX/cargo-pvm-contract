@@ -136,3 +136,36 @@ fn with_host_initialises_slot_fields() {
     contract.credit(alice, U256::from(42u64));
     assert_eq!(contract.balance_of(alice), U256::from(42u64));
 }
+
+#[test]
+fn convenience_accessors_return_mock_values() {
+    use pvm_contract_sdk::Address;
+
+    let mut value = [0u8; 32];
+    value[31] = 50;
+
+    let mut block = [0u8; 32];
+    block[31] = 10;
+
+    let mut timestamp = [0u8; 32];
+    timestamp[31] = 42;
+
+    let mut chain_id = [0u8; 32];
+    chain_id[31] = 1;
+
+    let mock = MockHostBuilder::new()
+        .caller([0xAA; 20])
+        .value_transferred(value)
+        .block_number(block)
+        .block_timestamp(timestamp)
+        .chain_id(chain_id)
+        .build();
+
+    let contract = Counter::with_host(mock);
+
+    assert_eq!(contract.caller(), Address::from([0xAA; 20]));
+    assert_eq!(contract.value(), U256::from_be_bytes::<32>(value));
+    assert_eq!(contract.block_number(), 10u64);
+    assert_eq!(contract.timestamp(), 42u64);
+    assert_eq!(contract.chain_id(), U256::from_be_bytes::<32>(chain_id));
+}
