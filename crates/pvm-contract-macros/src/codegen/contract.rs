@@ -1714,6 +1714,36 @@ fn strip_pvm_attrs(input: &ItemMod, struct_name: &Ident) -> syn::Result<TokenStr
             pub fn host(&self) -> &::pvm_contract_sdk::Host {
                 &self.host
             }
+
+            pub fn caller(&self) -> ::pvm_contract_sdk::Address {
+                let mut bytes = [0u8; 20];
+                self.host.caller(&mut bytes);
+                ::pvm_contract_sdk::Address(bytes)
+            }
+
+            pub fn value(&self) -> ::pvm_contract_sdk::U256 {
+                let mut bytes = [0u8; 32];
+                self.host.value_transferred(&mut bytes);
+                ::pvm_contract_sdk::U256::from_be_bytes(bytes)
+            }
+
+            pub fn block_number(&self) -> u64 {
+                let mut bytes = [0u8; 32];
+                self.host.block_number(&mut bytes);
+                u64::from_be_bytes(bytes[24..].try_into().unwrap())
+            }
+
+            pub fn timestamp(&self) -> u64 {
+                let mut bytes = [0u8; 32];
+                self.host.now(&mut bytes);
+                u64::from_be_bytes(bytes[24..].try_into().unwrap())
+            }
+
+            pub fn chain_id(&self) -> ::pvm_contract_sdk::U256 {
+                let mut bytes = [0u8; 32];
+                self.host.chain_id(&mut bytes);
+                ::pvm_contract_sdk::U256::from_be_bytes(bytes)
+            }
         }
 
         #[cfg(not(feature = "abi-gen"))]
@@ -2747,6 +2777,46 @@ mod tests {
         assert!(output.contains("\"owner\""));
         assert!(output.contains("Err (e)"));
         assert!(output.contains("REVERT"));
+    }
+
+    #[test]
+    fn generates_accessors() {
+        let item: syn::ItemMod = syn::parse_str(
+            r#"
+            mod my_contract {
+                pub struct MyContract;
+                impl MyContract {
+                    #[pvm_contract_macros::constructor]
+                    pub fn new(&mut self) {}
+                }
+            }
+        "#,
+        )
+        .unwrap();
+
+        let tokens = expand_contract(ContractArgs::default(), item).unwrap();
+        let output = tokens.to_string();
+
+        assert!(
+            output.contains("pub fn caller"),
+            "caller accessor should be added"
+        );
+        assert!(
+            output.contains("pub fn value"),
+            "value accessor should be added"
+        );
+        assert!(
+            output.contains("pub fn block_number"),
+            "block_number accessor should be added"
+        );
+        assert!(
+            output.contains("pub fn timestamp"),
+            "timestamp accessor should be added"
+        );
+        assert!(
+            output.contains("pub fn chain_id"),
+            "chain_id accessor should be added"
+        );
     }
 
     #[test]
