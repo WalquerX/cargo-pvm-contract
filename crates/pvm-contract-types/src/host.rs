@@ -135,6 +135,10 @@ pub trait HostApi {
     fn origin(&self, output: &mut [u8; 20]);
     fn code_hash(&self, addr: &[u8; 20], output: &mut [u8; 32]);
     fn code_size(&self, addr: &[u8; 20]) -> u64;
+    /// Returns true if the account ataddr has deployed code.
+    fn has_code(&self, addr: &[u8; 20]) -> bool {
+        self.code_size(addr) > 0
+    }
     fn delegate_call(
         &self,
         flags: CallFlags,
