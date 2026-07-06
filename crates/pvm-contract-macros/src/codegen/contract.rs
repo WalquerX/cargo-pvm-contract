@@ -1223,21 +1223,21 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
 
     let mod_content = strip_pvm_attrs(&input, struct_name)?;
 
+    // `alloc_setup` is emitted at the caller's crate root (sibling of the
+    // contract mod). Keep `extern crate alloc;` here, but do NOT add
+    // `use alloc::vec::Vec;` / `use alloc::string::String;` etc.: a `use` at
+    // the crate root pollutes the caller's namespace (colliding with the
+    // author's own crate-root imports, surfacing as E0252/E0259 pointed at the
+    // macro line) and is never consumed — it doesn't reach the contract mod
+    // (modules don't inherit a parent's `use`), and all generated allocations
+    // are fully qualified (`alloc::vec![..]`, `alloc::vec::Vec<u8>`). Codegen
+    // convention: reference external items by absolute path, never inject `use`.
     let alloc_setup = match args.allocator {
         Some(AllocatorKind::Pico) => {
             let allocator_size = args.allocator_size;
             quote! {
                 #[cfg(not(feature = "abi-gen"))]
                 extern crate alloc;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::vec;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::vec::Vec;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::string::String;
 
                 #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
                 #[global_allocator]
@@ -1255,15 +1255,6 @@ pub fn expand_contract(args: ContractArgs, input: ItemMod) -> syn::Result<TokenS
             quote! {
                 #[cfg(not(feature = "abi-gen"))]
                 extern crate alloc;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::vec;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::vec::Vec;
-
-                #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
-                use alloc::string::String;
 
                 #[cfg(all(not(feature = "abi-gen"), any(target_arch = "riscv32", target_arch = "riscv64")))]
                 #[global_allocator]
