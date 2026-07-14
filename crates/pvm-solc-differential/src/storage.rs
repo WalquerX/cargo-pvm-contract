@@ -35,6 +35,13 @@ const CALLER: RAddr = RAddr::new([0x22; 20]);
 // solc + revm ground truth
 // ---------------------------------------------------------------------------
 
+/// 4-byte selector of a canonical Solidity signature. Shared by the fixed-value
+/// `solc_storage` path and the property tests' calldata builder.
+fn selector(sig: &str) -> [u8; 4] {
+    let h = keccak256(sig.as_bytes());
+    [h[0], h[1], h[2], h[3]]
+}
+
 /// Compile `source` with solc and return the named contract's deployed
 /// (runtime) EVM bytecode.
 fn solc_deployed_bytecode(source: &str, contract: &str) -> Vec<u8> {
@@ -54,10 +61,33 @@ fn hex_decode(s: &str) -> Vec<u8> {
         .collect()
 }
 
+/// Cache of compiled deployed bytecode keyed by `contract\0source`, so a
+/// property test that runs the same `.sol` across hundreds of generated values
+/// pays the (slow) `solc` compile exactly once and only re-executes on revm.
+fn cached_bytecode(source: &str, contract: &str) -> Vec<u8> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<String, Vec<u8>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = format!("{contract}\0{source}");
+    let mut guard = cache.lock().expect("bytecode cache mutex");
+    guard
+        .entry(key)
+        .or_insert_with(|| solc_deployed_bytecode(source, contract))
+        .clone()
+}
+
 /// Execute the Solidity contract's `populate()` on revm and return its
 /// resulting account storage as a normalized map.
 fn solc_storage(source: &str, contract: &str) -> StorageMap {
-    let code = solc_deployed_bytecode(source, contract);
+    solc_storage_calldata(source, contract, selector("populate()").to_vec())
+}
+
+/// Like [`solc_storage`] but drives the contract with caller-supplied
+/// `calldata` (selector + ABI-encoded args), letting a property test invoke
+/// `populate(<generated value>)` with a compile cached across cases.
+fn solc_storage_calldata(source: &str, contract: &str, calldata: Vec<u8>) -> StorageMap {
+    let code = cached_bytecode(source, contract);
     let bytecode = Bytecode::new_legacy(RBytes::from(code));
 
     let mut db = CacheDB::new(EmptyDB::default());
@@ -70,14 +100,12 @@ fn solc_storage(source: &str, contract: &str) -> StorageMap {
         },
     );
 
-    let selector = keccak256(b"populate()")[..4].to_vec();
-
     let mut evm = Context::mainnet().with_db(db).build_mainnet();
     let result = evm
         .transact_commit(TxEnv {
             caller: CALLER,
             kind: TxKind::Call(CONTRACT),
-            data: RBytes::from(selector),
+            data: RBytes::from(calldata),
             // EIP-7825 caps tx gas at 2^24; populate() is tiny so this is ample.
             gas_limit: 16_777_216,
             gas_price: 0,
@@ -123,14 +151,12 @@ fn normalize_mock(mock: &MockHost) -> StorageMap {
     map
 }
 
-/// Big-endian pad to 32 bytes. pvm-storage always writes full 32-byte words, so
-/// this is a no-op in practice; the `<= 32` assert guards against a short write
-/// rather than silently truncating.
+/// A `MockHost` storage key/value is always a full 32-byte word (pvm-storage
+/// writes via `set_storage_or_clear(&[u8; 32])`, and the mock stores it
+/// verbatim). Convert strictly: any other length is an unexpected short/long
+/// write and should surface loudly rather than be silently reshaped.
 fn to_32(bytes: &[u8]) -> [u8; 32] {
-    assert!(bytes.len() <= 32, "storage word longer than 32 bytes");
-    let mut out = [0u8; 32];
-    out[32 - bytes.len()..].copy_from_slice(bytes);
-    out
+    <[u8; 32]>::try_from(bytes).expect("storage word must be exactly 32 bytes")
 }
 
 // ---------------------------------------------------------------------------
@@ -516,14 +542,14 @@ contract MapWide {
     assert_eq!(normalize_mock(&mock), solc_storage(SOL, "MapWide"));
 }
 
-// --- mixed-packed struct value (top-level) + sentinel ----------------------
+// --- mixed-packed struct value (top-level) + witness -----------------------
 
 #[pvm_contract_sdk::contract]
 mod mixed {
     use super::*;
     pub struct MixedC {
         pub m: Lazy<Mixed>,
-        pub sentinel: Lazy<U256>,
+        pub witness: Lazy<U256>,
     }
     impl MixedC {
         #[pvm_contract_sdk::constructor]
@@ -535,7 +561,7 @@ mod mixed {
                 count: 0x0102_0304_0506_0708u64,
                 who: Address::from(ADDR_B),
             });
-            self.sentinel.set(&U256::from(0xDEADu64));
+            self.witness.set(&U256::from(0xDEADu64));
         }
     }
 }
@@ -546,11 +572,11 @@ fn mixed_packed_struct_matches_solc() {
 pragma solidity ^0.8.26;
 contract MixedStruct {
     struct M { bool flag; uint64 count; address who; }
-    M m;               // slot 0 (flag@0, count@1, who@9 — 29 bytes)
-    uint256 sentinel;  // slot 1
+    M m;              // slot 0 (flag@0, count@1, who@9 — 29 bytes)
+    uint256 witness;  // slot 1 (positive control)
     function populate() external {
         m = M(true, 0x0102030405060708, address(uint160(0x00BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB)));
-        sentinel = 0xDEAD;
+        witness = 0xDEAD;
     }
 }
 "#;
@@ -914,7 +940,7 @@ mod empty {
     use super::*;
     pub struct Empty {
         pub s: Lazy<String>,
-        pub sentinel: Lazy<U256>,
+        pub witness: Lazy<U256>,
     }
     impl Empty {
         #[pvm_contract_sdk::constructor]
@@ -922,7 +948,7 @@ mod empty {
         #[pvm_contract_sdk::method]
         pub fn populate(&mut self) {
             self.s.set(&String::new());
-            self.sentinel.set(&U256::from(5u64));
+            self.witness.set(&U256::from(5u64));
         }
     }
 }
@@ -941,11 +967,11 @@ fn empty_string_matches_solc() {
     const SOL: &str = r#"
 pragma solidity ^0.8.26;
 contract Empty {
-    string s;          // slot 0
-    uint256 sentinel;  // slot 1
+    string s;         // slot 0
+    uint256 witness;  // slot 1 (positive control: proves the tx ran + committed)
     function populate() external {
         s = "";
-        sentinel = 5;
+        witness = 5;
     }
 }
 "#;
@@ -953,6 +979,20 @@ contract Empty {
     let mut c = empty::Empty::with_host(mock.clone());
     c.populate();
     assert_eq!(normalize_mock(&mock), solc_storage(SOL, "Empty"));
+}
+
+/// Empty `bytes`: same intentional divergence as [`empty_string_matches_solc`]
+/// — the SDK writes `EMPTY_INLINE_SENTINEL` at byte 30 so `try_get` can tell
+/// `""` apart from an unset slot (Option semantics solc lacks; solc deletes the
+/// slot). The differential therefore FAILS; kept as an ignored, executable
+/// record. Un-ignore if the SDK ever drops the sentinel. Uses the
+/// `bytes_storage_maps` helper defined with the `bytes` property test.
+#[test]
+#[ignore = "intentional divergence: pvm-storage writes EMPTY_INLINE_SENTINEL for \
+            empty dynamics (try_get Option semantics); solc deletes the slot"]
+fn empty_bytes_matches_solc() {
+    let (got, want) = bytes_storage_maps(&[]);
+    assert_eq!(got, want);
 }
 
 #[pvm_contract_sdk::contract]
@@ -1144,13 +1184,13 @@ contract Buckets {
 // ---------------------------------------------------------------------------
 
 /// `delete v` (whole-vector clear): length slot + every element slot are
-/// deleted; a sentinel proves `clear()` doesn't over-delete.
+/// deleted; a witness slot proves `clear()` doesn't over-delete.
 #[pvm_contract_sdk::contract]
 mod vec_clear {
     use super::*;
     pub struct VecClear {
         pub v: StorageVec<U256>,
-        pub sentinel: Lazy<U256>,
+        pub witness: Lazy<U256>,
     }
     impl VecClear {
         #[pvm_contract_sdk::constructor]
@@ -1161,7 +1201,7 @@ mod vec_clear {
                 self.v.push(&U256::from(n));
             }
             self.v.clear();
-            self.sentinel.set(&U256::from(7u64));
+            self.witness.set(&U256::from(7u64));
         }
     }
 }
@@ -1171,12 +1211,12 @@ fn storage_vec_clear_matches_solc() {
     const SOL: &str = r#"
 pragma solidity ^0.8.26;
 contract VecClear {
-    uint256[] v;       // slot 0
-    uint256 sentinel;  // slot 1
+    uint256[] v;      // slot 0
+    uint256 witness;  // slot 1 (positive control)
     function populate() external {
         v.push(11); v.push(22); v.push(33);
         delete v;
-        sentinel = 7;
+        witness = 7;
     }
 }
 "#;
@@ -1184,6 +1224,53 @@ contract VecClear {
     let mut c = vec_clear::VecClear::with_host(mock.clone());
     c.populate();
     assert_eq!(normalize_mock(&mock), solc_storage(SOL, "VecClear"));
+}
+
+/// `pop` all the way to empty: distinct code path from `clear()`. Each `pop`
+/// must zero its element slot, and emptying must delete the length slot — a
+/// stale element or length slot would show up as an extra nonzero entry. The
+/// `witness` proves the tx ran (both sides otherwise collapse to just it).
+#[pvm_contract_sdk::contract]
+mod vec_pop_empty {
+    use super::*;
+    pub struct VecPopEmpty {
+        pub v: StorageVec<U256>,
+        pub witness: Lazy<U256>,
+    }
+    impl VecPopEmpty {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self) {
+            for n in [11u64, 22, 33] {
+                self.v.push(&U256::from(n));
+            }
+            self.v.pop();
+            self.v.pop();
+            self.v.pop();
+            self.witness.set(&U256::from(9u64));
+        }
+    }
+}
+
+#[test]
+fn storage_vec_pop_to_empty_matches_solc() {
+    const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract VecPopEmpty {
+    uint256[] v;      // slot 0
+    uint256 witness;  // slot 1 (positive control)
+    function populate() external {
+        v.push(11); v.push(22); v.push(33);
+        v.pop(); v.pop(); v.pop();
+        witness = 9;
+    }
+}
+"#;
+    let mock = MockHostBuilder::new().build();
+    let mut c = vec_pop_empty::VecPopEmpty::with_host(mock.clone());
+    c.populate();
+    assert_eq!(normalize_mock(&mock), solc_storage(SOL, "VecPopEmpty"));
 }
 
 /// `v[i] = x` (overwrite an existing index) — read-modify-write of one element
@@ -1262,4 +1349,499 @@ contract VecPopPacked {
     let mut c = vec_pop_packed::VecPopPacked::with_host(mock.clone());
     c.populate();
     assert_eq!(normalize_mock(&mock), solc_storage(SOL, "VecPopPacked"));
+}
+
+// ---------------------------------------------------------------------------
+// Property-based value equivalence (proptest).
+//
+// The fixtures above pin *specific* values; these assert the SDK ⇄ solc
+// storage equivalence holds for *arbitrary* values across the shapes where the
+// byte encoding is value-dependent — sub-word packing / read-modify-write,
+// signed two's-complement sign-extension, and dynamic `bytes` inline-vs-spilled.
+// Each contract's `populate(..)` takes the generated value(s) as calldata; the
+// solc bytecode is compiled once (see `cached_bytecode`) and only re-executed
+// on revm per case, so a full run is cheap after the first compile.
+//
+// The `bytes` generator spans length 1..=72 (inline < 32 and spilled >= 32).
+// Empty dynamic values are an intentional SDK/solc divergence (the SDK writes
+// EMPTY_INLINE_SENTINEL so `try_get` can tell "" apart from unset; solc deletes
+// the slot), so length 0 is excluded from the randomized range and instead
+// recorded by the ignored `empty_bytes_matches_solc` test below — mirroring the
+// existing `empty_string_matches_solc`.
+// ---------------------------------------------------------------------------
+
+use proptest::prelude::*;
+use pvm_contract_sdk::SolEncode;
+
+/// Assemble calldata (`selector ++ ABI-encoded args`) for a `populate(..)` call.
+///
+/// The argument tuple is encoded with the **SDK's own** [`SolEncode`] (a tuple
+/// `(T1, T2, ..)` encodes exactly as a Solidity parameter list). This
+/// deliberately routes the value through the SDK's ABI encoder: since the same
+/// value is written into storage on the SDK side and decoded-then-stored by
+/// solc, a green run cross-checks the SDK's ABI encoding against solc too, not
+/// just the storage layout. A bug in either surfaces as a storage mismatch.
+fn calldata<T: SolEncode>(sig: &str, args: &T) -> Vec<u8> {
+    let mut cd = selector(sig).to_vec();
+    let mut params = vec![0u8; args.encode_len()];
+    args.encode_to(&mut params);
+    cd.extend_from_slice(&params);
+    cd
+}
+
+/// Strategy for an arbitrary `I256`. `U256` gets its `Arbitrary` from ruint's
+/// `proptest` feature, but `I256` is the SDK's own newtype (ruint has no signed
+/// type), so wrap a generated `U256` — the bit pattern is a full-range
+/// two's-complement value (top bit is the sign).
+fn any_i256() -> impl Strategy<Value = I256> {
+    any::<U256>().prop_map(I256::from_raw)
+}
+
+// Two `uint128` packed into slot 0 (lo @ offset 0, hi @ offset 16). Exercises
+// packed read-modify-write across the full value range (high bits set, etc.).
+#[pvm_contract_sdk::contract]
+mod prop_pair {
+    use super::*;
+    pub struct P {
+        pub lo: Lazy<u128>,
+        pub hi: Lazy<u128>,
+    }
+    impl P {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, lo: u128, hi: u128) {
+            self.lo.set(&lo);
+            self.hi.set(&hi);
+        }
+    }
+}
+
+// `bool` + `uint32` + `address` packed into slot 0 (offsets 0, 1, 5).
+#[pvm_contract_sdk::contract]
+mod prop_mixed {
+    use super::*;
+    pub struct M {
+        pub flag: Lazy<bool>,
+        pub small: Lazy<u32>,
+        pub who: Lazy<Address>,
+    }
+    impl M {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, flag: bool, small: u32, who: Address) {
+            self.flag.set(&flag);
+            self.small.set(&small);
+            self.who.set(&who);
+        }
+    }
+}
+
+// `int128` + `int64` + `int64` packed into slot 0 (offsets 0, 16, 24).
+// Exercises signed two's-complement encoding inside a packed slot.
+#[pvm_contract_sdk::contract]
+mod prop_signed {
+    use super::*;
+    pub struct S {
+        pub a: Lazy<i128>,
+        pub lo: Lazy<i64>,
+        pub hi: Lazy<i64>,
+    }
+    impl S {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, a: i128, lo: i64, hi: i64) {
+            self.a.set(&a);
+            self.lo.set(&lo);
+            self.hi.set(&hi);
+        }
+    }
+}
+
+// A single dynamic `bytes` — inline (< 32) vs spilled (>= 32) depending on len.
+#[pvm_contract_sdk::contract]
+mod prop_bytes {
+    use super::*;
+    pub struct B {
+        pub b: Lazy<Bytes>,
+    }
+    impl B {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, v: Bytes) {
+            self.b.set(&v);
+        }
+    }
+}
+
+// Full-word `uint256` in a single slot — arbitrary 256-bit value (the packed
+// fixtures only reach 128 bits, so this covers the high half of the word).
+#[pvm_contract_sdk::contract]
+mod prop_u256 {
+    use super::*;
+    pub struct W {
+        pub x: Lazy<U256>,
+    }
+    impl W {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, x: U256) {
+            self.x.set(&x);
+        }
+    }
+}
+
+// Dynamic `uint32[]` — `StorageVec` sub-word element packing (8 per slot) over
+// an arbitrary length and arbitrary element values.
+#[pvm_contract_sdk::contract]
+mod prop_vec {
+    use super::*;
+    pub struct V {
+        pub xs: StorageVec<u32>,
+    }
+    impl V {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, xs: Vec<u32>) {
+            for x in &xs {
+                self.xs.push(x);
+            }
+        }
+    }
+}
+
+// `mapping(address => uint256)` — keccak slot derivation over an arbitrary key
+// and value.
+#[pvm_contract_sdk::contract]
+mod prop_map {
+    use super::*;
+    pub struct Mp {
+        pub m: Mapping<Address, U256>,
+    }
+    impl Mp {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, k: Address, v: U256) {
+            self.m.insert(&k, &v);
+        }
+    }
+}
+
+// Full-slot `int256` — arbitrary two's-complement value (incl. negative). The
+// packed-signed fixture only reaches 128 bits; this covers the full width.
+#[pvm_contract_sdk::contract]
+mod prop_i256 {
+    use super::*;
+    pub struct Si {
+        pub a: Lazy<I256>,
+    }
+    impl Si {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, a: I256) {
+            self.a.set(&a);
+        }
+    }
+}
+
+// `bytesN` storage: full-slot `bytes32` + two packed `bytes4`. `bytesN` is
+// right-aligned in its slot (and packs sub-word) — the alignment previously
+// only hand-verified against solc; this randomizes the byte content.
+#[pvm_contract_sdk::contract]
+mod prop_bytesn {
+    use super::*;
+    pub struct Bn {
+        pub big: Lazy<[u8; 32]>,
+        pub a: Lazy<[u8; 4]>,
+        pub b: Lazy<[u8; 4]>,
+    }
+    impl Bn {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, big: [u8; 32], a: [u8; 4], b: [u8; 4]) {
+            self.big.set(&big);
+            self.a.set(&a);
+            self.b.set(&b);
+        }
+    }
+}
+
+/// Store `data` as a single `bytes` on both the SDK and solc, returning the two
+/// normalized storage maps for comparison. Shared by the randomized range test
+/// and the deterministic empty-value test below.
+fn bytes_storage_maps(data: &[u8]) -> (StorageMap, StorageMap) {
+    const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract B {
+    bytes b;
+    function populate(bytes calldata v) external { b = v; }
+}
+"#;
+    let mock = MockHostBuilder::new().build();
+    let mut c = prop_bytes::B::with_host(mock.clone());
+    c.populate(Bytes(data.to_vec()));
+    let want = solc_storage_calldata(
+        SOL,
+        "B",
+        calldata("populate(bytes)", &(Bytes(data.to_vec()),)),
+    );
+    (normalize_mock(&mock), want)
+}
+
+// `bytes` overwrite fixture: sets the value twice, so a shrinking overwrite
+// (long → short) must free the now-unused keccak body slots, matching solc.
+#[pvm_contract_sdk::contract]
+mod prop_bytes_ov {
+    use super::*;
+    pub struct Bov {
+        pub b: Lazy<Bytes>,
+    }
+    impl Bov {
+        #[pvm_contract_sdk::constructor]
+        pub fn new(&mut self) {}
+        #[pvm_contract_sdk::method]
+        pub fn populate(&mut self, first: Bytes, second: Bytes) {
+            self.b.set(&first);
+            self.b.set(&second);
+        }
+    }
+}
+
+/// Deterministic inline↔spill boundary coverage for `bytes`. The randomized
+/// range test hits these lengths only ~half the time, but 31 (max inline), 32
+/// (min spill), and 64/65 (body-slot boundary) are the codec's most bug-prone
+/// points, so pin them.
+#[test]
+fn bytes_boundary_lengths_match_solc() {
+    for len in [31usize, 32, 33, 64, 65] {
+        let data = vec![0xAB; len];
+        let (got, want) = bytes_storage_maps(&data);
+        assert_eq!(got, want, "bytes length {len} diverged from solc");
+    }
+}
+
+/// Overwriting a spilled `bytes` with a shorter value must zero the now-unused
+/// keccak body slots exactly as solc does; a stale-tail bug would leave extra
+/// nonzero slots that the diff catches.
+#[test]
+fn bytes_shrink_overwrite_matches_solc() {
+    const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract Bov {
+    bytes b;
+    function populate(bytes calldata first, bytes calldata second) external {
+        b = first;
+        b = second;
+    }
+}
+"#;
+    for (first_len, second_len) in [(70usize, 5usize), (70, 40), (64, 32), (33, 31)] {
+        let first = vec![0xCD; first_len];
+        let second = vec![0xEF; second_len];
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_bytes_ov::Bov::with_host(mock.clone());
+        c.populate(Bytes(first.clone()), Bytes(second.clone()));
+        let want = solc_storage_calldata(
+            SOL,
+            "Bov",
+            calldata("populate(bytes,bytes)", &(Bytes(first), Bytes(second))),
+        );
+        assert_eq!(
+            normalize_mock(&mock),
+            want,
+            "shrink {first_len} -> {second_len} diverged from solc"
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    #[test]
+    fn prop_packed_u128_pair_matches_solc(lo in any::<u128>(), hi in any::<u128>()) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract P {
+    uint128 lo;
+    uint128 hi;
+    function populate(uint128 l, uint128 h) external { lo = l; hi = h; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_pair::P::with_host(mock.clone());
+        c.populate(lo, hi);
+        let want = solc_storage_calldata(
+            SOL,
+            "P",
+            calldata("populate(uint128,uint128)", &(lo, hi)),
+        );
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_packed_bool_u32_addr_matches_solc(
+        flag in any::<bool>(),
+        small in any::<u32>(),
+        who in proptest::array::uniform20(any::<u8>()),
+    ) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract M {
+    bool flag;
+    uint32 small;
+    address who;
+    function populate(bool f, uint32 s, address w) external { flag = f; small = s; who = w; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_mixed::M::with_host(mock.clone());
+        let who = Address::from(who);
+        c.populate(flag, small, who);
+        let want = solc_storage_calldata(
+            SOL,
+            "M",
+            calldata("populate(bool,uint32,address)", &(flag, small, who)),
+        );
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_signed_packed_matches_solc(
+        a in any::<i128>(),
+        lo in any::<i64>(),
+        hi in any::<i64>(),
+    ) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract S {
+    int128 a;
+    int64 lo;
+    int64 hi;
+    function populate(int128 x, int64 l, int64 h) external { a = x; lo = l; hi = h; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_signed::S::with_host(mock.clone());
+        c.populate(a, lo, hi);
+        let want = solc_storage_calldata(
+            SOL,
+            "S",
+            calldata("populate(int128,int64,int64)", &(a, lo, hi)),
+        );
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_bytes_inline_and_spilled_match_solc(
+        data in proptest::collection::vec(any::<u8>(), 1usize..=72),
+    ) {
+        let (got, want) = bytes_storage_maps(&data);
+        prop_assert_eq!(got, want);
+    }
+
+    #[test]
+    fn prop_u256_full_slot_matches_solc(x in any::<U256>()) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract W {
+    uint256 x;
+    function populate(uint256 v) external { x = v; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_u256::W::with_host(mock.clone());
+        c.populate(x);
+        let want = solc_storage_calldata(SOL, "W", calldata("populate(uint256)", &(x,)));
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_vec_u32_matches_solc(
+        xs in proptest::collection::vec(any::<u32>(), 1usize..=16),
+    ) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract V {
+    uint32[] xs;
+    function populate(uint32[] calldata vs) external {
+        for (uint i = 0; i < vs.length; i++) { xs.push(vs[i]); }
+    }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_vec::V::with_host(mock.clone());
+        c.populate(xs.clone());
+        let want = solc_storage_calldata(SOL, "V", calldata("populate(uint32[])", &(xs,)));
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_mapping_addr_u256_matches_solc(
+        who in proptest::array::uniform20(any::<u8>()),
+        v in any::<U256>(),
+    ) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract Mp {
+    mapping(address => uint256) m;
+    function populate(address k, uint256 val) external { m[k] = val; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let who = Address::from(who);
+        let mut c = prop_map::Mp::with_host(mock.clone());
+        c.populate(who, v);
+        let want = solc_storage_calldata(SOL, "Mp", calldata("populate(address,uint256)", &(who, v)));
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_i256_full_slot_matches_solc(a in any_i256()) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract Si {
+    int256 a;
+    function populate(int256 v) external { a = v; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_i256::Si::with_host(mock.clone());
+        c.populate(a);
+        let want = solc_storage_calldata(SOL, "Si", calldata("populate(int256)", &(a,)));
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
+
+    #[test]
+    fn prop_bytesn_alignment_matches_solc(
+        big in proptest::array::uniform32(any::<u8>()),
+        a in proptest::array::uniform4(any::<u8>()),
+        b in proptest::array::uniform4(any::<u8>()),
+    ) {
+        const SOL: &str = r#"
+pragma solidity ^0.8.26;
+contract Bn {
+    bytes32 big;  // slot 0 (full slot)
+    bytes4 a;     // slot 1, offset 0
+    bytes4 b;     // slot 1, offset 4
+    function populate(bytes32 g, bytes4 x, bytes4 y) external { big = g; a = x; b = y; }
+}
+"#;
+        let mock = MockHostBuilder::new().build();
+        let mut c = prop_bytesn::Bn::with_host(mock.clone());
+        c.populate(big, a, b);
+        let want = solc_storage_calldata(
+            SOL,
+            "Bn",
+            calldata("populate(bytes32,bytes4,bytes4)", &(big, a, b)),
+        );
+        prop_assert_eq!(normalize_mock(&mock), want);
+    }
 }
