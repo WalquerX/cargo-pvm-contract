@@ -1286,4 +1286,28 @@ mod tests {
             "non-halt panic must propagate out of run_until_halt"
         );
     }
+
+    #[test]
+    fn env_accessors_via_host() {
+        use std::rc::Rc;
+        use crate::host::Host;
+
+        let mut block = [0u8; 32];
+        block[31] = 5;
+
+        let mut ts = [0u8; 32];
+        ts[31] = 99;
+
+        let mock = MockHostBuilder::new()
+            .caller([0xAA; 20])
+            .block_number(block)
+            .block_timestamp(ts)
+            .build();
+        let host = Host::from_dyn(Rc::new(mock));
+        let env = host.env();
+
+        assert_eq!(env.caller().0, [0xAA; 20]);
+        assert_eq!(env.block_number(), 5);
+        assert_eq!(env.timestamp(), 99);
+    }
 }
